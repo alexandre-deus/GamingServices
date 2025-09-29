@@ -1,0 +1,107 @@
+#include "GamingServicesSubsystem.h"
+#include "Misc/ConfigCacheIni.h"
+#include "GamingServiceTypes.h"
+#include "EOSGamingService.h"
+#include "SteamworksGamingService.h"
+
+void UGamingServicesSubsystem::Initialize(FSubsystemCollectionBase& Collection)
+{
+#ifdef USE_EOS
+	Service = MakeUnique<FEOSGamingService>();
+#elif USE_STEAMWORKS
+    Service = MakeUnique<FSteamworksGamingService>();
+#endif
+	check(Service);
+	Super::Initialize(Collection);
+}
+
+void UGamingServicesSubsystem::Deinitialize()
+{
+	Service->Shutdown();
+}
+
+void UGamingServicesSubsystem::Tick(float DeltaTime)
+{
+	Service->Tick();
+}
+
+TStatId UGamingServicesSubsystem::GetStatId() const
+{
+	RETURN_QUICK_DECLARE_CYCLE_STAT(UGamingServicesSubsystem, STATGROUP_Tickables);
+}
+
+bool UGamingServicesSubsystem::Connect(const FGamingServiceConnectParams& Params)
+{
+	return Service->Connect(Params);
+}
+
+void UGamingServicesSubsystem::UnlockAchievement(const FString& AchievementId)
+{
+	Service->UnlockAchievement(AchievementId, [this](const FGamingServiceResult& R)
+	{
+		OnAchievementUnlocked.Broadcast(R);
+	});
+}
+
+void UGamingServicesSubsystem::QueryAchievements()
+{
+	Service->QueryAchievements([this](const FAchievementsQueryResult& R)
+	{
+		OnAchievementsQueried.Broadcast(R);
+	});
+}
+
+void UGamingServicesSubsystem::WriteLeaderboardScore(const FString& LeaderboardId, int32 Score)
+{
+	Service->WriteLeaderboardScore(LeaderboardId, Score, [this](const FGamingServiceResult& R)
+	{
+		OnLeaderboardScoreWritten.Broadcast(R);
+	});
+}
+
+void UGamingServicesSubsystem::QueryLeaderboardPage(const FString& LeaderboardId, int32 Limit, int32 ContinuationToken)
+{
+	Service->QueryLeaderboardPage(LeaderboardId, Limit, ContinuationToken, [this](const FLeaderboardResult& R)
+	{
+		OnLeaderboardQueried.Broadcast(R);
+	});
+}
+
+void UGamingServicesSubsystem::IngestStat(const FString& StatName, int32 Amount)
+{
+	Service->IngestStat(StatName, Amount, [this](const FGamingServiceResult& R)
+	{
+		OnStatProgressed.Broadcast(R);
+	});
+}
+
+void UGamingServicesSubsystem::QueryStat(const FString& StatName)
+{
+	Service->QueryStat(StatName, [this](const FStatQueryResult& R)
+	{
+		OnStatQueried.Broadcast(R);
+	});
+}
+
+void UGamingServicesSubsystem::Login(const FGamingServiceLoginParams& Params)
+{
+	Service->Login(Params, [this](const FGamingServiceResult& Result)
+	{
+		OnLoggedIn.Broadcast(Result);
+	});
+}
+
+bool UGamingServicesSubsystem::IsConnected() const
+{
+	return Service->IsInitialized();
+}
+
+bool UGamingServicesSubsystem::IsLoggedIn() const
+{
+	return Service->IsLoggedIn();
+}
+
+bool UGamingServicesSubsystem::NeedsLogin() const
+{
+	return Service->NeedsLogin();
+}

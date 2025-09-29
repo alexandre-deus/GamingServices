@@ -1,0 +1,16 @@
+EOS should have the tree:
+
+EOS-------SDK-------Bin
+            |
+            --------Include
+            |
+            ...
+
+
+Steamworks should have the tree:
+
+Steamworks----sdk------public
+                |
+                -------redistributable_bin
+                |
+                ...

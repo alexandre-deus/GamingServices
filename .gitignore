@@ -1,0 +1,4 @@
+Intermediate
+Binaries
+ThirdParty/*
+!ThirdParty/place_sdks_here.txt
