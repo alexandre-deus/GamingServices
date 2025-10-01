@@ -7,6 +7,19 @@ public class GamingServices : ModuleRules
     private string PluginRoot => Path.GetFullPath(Path.Combine(ModuleDirectory, "..", ".."));
     private string ThirdPartyRoot => Path.Combine(PluginRoot, "ThirdParty");
 
+    public bool IsEOSAvailable()
+    {
+        var EOSRoot = Path.Combine(ThirdPartyRoot, "EOS", "SDK");
+        var EOSInclude = Path.Combine(EOSRoot, "Include");
+        var EOSLibDir = Path.Combine(EOSRoot, "Lib");
+        var EOSBinDir = Path.Combine(EOSRoot, "Bin");
+
+        return Directory.Exists(EOSRoot) && 
+               Directory.Exists(EOSInclude) && 
+               Directory.Exists(EOSLibDir) && 
+               Directory.Exists(EOSBinDir);
+    }
+
     public void AddEOS(ReadOnlyTargetRules Target)
     {
         var EOSRoot     = Path.Combine(ThirdPartyRoot, "EOS", "SDK");
@@ -35,6 +48,17 @@ public class GamingServices : ModuleRules
         {
             RuntimeDependencies.Add($"{EOSBinDir}/libEOSSDK-Mac-Shipping.dylib");
         }
+    }
+
+    public bool IsSteamworksAvailable()
+    {
+        string SteamRoot = Path.Combine(ThirdPartyRoot, "Steamworks", "sdk");
+        string SteamInclude = Path.Combine(SteamRoot, "public");
+        string SteamBinRoot = Path.Combine(SteamRoot, "redistributable_bin");
+
+        return Directory.Exists(SteamRoot) && 
+               Directory.Exists(SteamInclude) && 
+               Directory.Exists(SteamBinRoot);
     }
 
     public void AddSteamworks(ReadOnlyTargetRules Target)
@@ -88,16 +112,31 @@ public class GamingServices : ModuleRules
         // Switch backend here
         const EServiceBackends backend = EServiceBackends.EpicOnlineServices;
 
+        bool bServiceConfigured = false;
         switch (backend)
         {
             case EServiceBackends.EpicOnlineServices:
-                PublicDefinitions.Add("USE_EOS");
-				AddEOS(Target);
-				break;
-            case EServiceBackends.Steamworks:
-                AddSteamworks(Target);
-                PublicDefinitions.Add("USE_STEAMWORKS");
+                if (IsEOSAvailable())
+                {
+                    PublicDefinitions.Add("USE_EOS");
+                    AddEOS(Target);
+                    bServiceConfigured = true;
+                }
                 break;
+            case EServiceBackends.Steamworks:
+                if (IsSteamworksAvailable())
+                {
+                    AddSteamworks(Target);
+                    PublicDefinitions.Add("USE_STEAMWORKS");
+                    bServiceConfigured = true;
+                }
+                break;
+        }
+
+        // Fallback to null service if no SDK is available
+        if (!bServiceConfigured)
+        {
+            System.Console.WriteLine($"Warning: {backend} SDK not available. Falling back to null service.");
         }
     }
 }

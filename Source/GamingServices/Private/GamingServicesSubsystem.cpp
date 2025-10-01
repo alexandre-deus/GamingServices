@@ -3,13 +3,16 @@
 #include "GamingServiceTypes.h"
 #include "EOSGamingService.h"
 #include "SteamworksGamingService.h"
+#include "NullGamingService.h"
 
 void UGamingServicesSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
 #ifdef USE_EOS
 	Service = MakeUnique<FEOSGamingService>();
-#elif USE_STEAMWORKS
+#elif defined(USE_STEAMWORKS)
     Service = MakeUnique<FSteamworksGamingService>();
+#else
+	Service = MakeUnique<FNullGamingService>();
 #endif
 	check(Service);
 	Super::Initialize(Collection);
