@@ -38,6 +38,11 @@ bool UGamingServicesSubsystem::Connect(const FGamingServiceConnectParams& Params
 	return Service->Connect(Params);
 }
 
+void UGamingServicesSubsystem::Shutdown()
+{
+	Service->Shutdown();
+}
+
 void UGamingServicesSubsystem::UnlockAchievement(const FString& AchievementId)
 {
 	Service->UnlockAchievement(AchievementId, [this](const FGamingServiceResult& R)
@@ -107,4 +112,68 @@ bool UGamingServicesSubsystem::IsLoggedIn() const
 bool UGamingServicesSubsystem::NeedsLogin() const
 {
 	return Service->NeedsLogin();
+}
+
+void UGamingServicesSubsystem::WriteFile(const FString& FilePath, const TArray<uint8>& Data)
+{
+	Service->WriteFile(FilePath, Data, [this](const FGamingServiceResult& R)
+	{
+		OnFileWritten.Broadcast(R);
+	});
+}
+
+void UGamingServicesSubsystem::ReadFile(const FString& FilePath)
+{
+	Service->ReadFile(FilePath, [this](const FFileReadResult& R)
+	{
+		OnFileRead.Broadcast(R);
+	});
+}
+
+void UGamingServicesSubsystem::DeleteFile(const FString& FilePath)
+{
+	Service->DeleteFile(FilePath, [this](const FGamingServiceResult& R)
+	{
+		OnFileDeleted.Broadcast(R);
+	});
+}
+
+void UGamingServicesSubsystem::ListFiles(const FString& DirectoryPath)
+{
+	Service->ListFiles(DirectoryPath, [this](const FFilesListResult& R)
+	{
+		OnFilesListed.Broadcast(R);
+	});
+}
+
+void UGamingServicesSubsystem::SetRemoteSetting(const FString& Key, const FString& Value)
+{
+	Service->SetRemoteSetting(Key, Value, [this](const FRemoteSettingResult& R)
+	{
+		OnRemoteSettingChanged.Broadcast(R);
+	});
+}
+
+void UGamingServicesSubsystem::GetRemoteSetting(const FString& Key)
+{
+	Service->GetRemoteSetting(Key, [this](const FRemoteSettingResult& R)
+	{
+		OnRemoteSettingQueried.Broadcast(R);
+	});
+}
+
+void UGamingServicesSubsystem::DeleteRemoteSetting(const FString& Key)
+{
+	Service->DeleteRemoteSetting(Key, [this](const FRemoteSettingResult& R)
+	{
+		OnRemoteSettingDeleted.Broadcast(R);
+	});
+}
+
+void UGamingServicesSubsystem::ListRemoteSettings()
+{
+	Service->ListRemoteSettings([this](const FRemoteSettingsListResult& R)
+	{
+		OnRemoteSettingsListed.Broadcast(R);
+	});
 }

@@ -3,7 +3,7 @@
 #include "CoreMinimal.h"
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "GamingServiceTypes.h"
-#include "IGamingService.h"
+#include "FGamingService.h"
 #include "GamingServicesSubsystem.generated.h"
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGamingLoggedIn, const FGamingServiceResult&, Result);
@@ -20,6 +20,22 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGamingStatProgressed, const FGami
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGamingStatQueried, const FStatQueryResult&, Result);
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGamingFileWritten, const FGamingServiceResult&, Result);
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGamingFileRead, const FFileReadResult&, Result);
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGamingFileDeleted, const FGamingServiceResult&, Result);
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGamingFilesListed, const FFilesListResult&, Result);
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGamingRemoteSettingChanged, const FRemoteSettingResult&, Result);
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGamingRemoteSettingQueried, const FRemoteSettingResult&, Result);
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGamingRemoteSettingDeleted, const FRemoteSettingResult&, Result);
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGamingRemoteSettingsListed, const FRemoteSettingsListResult&, Result);
+
 UCLASS()
 class GAMINGSERVICES_API UGamingServicesSubsystem : public UGameInstanceSubsystem, public FTickableGameObject
 {
@@ -29,6 +45,9 @@ public:
 	// Connection / initialization
 	UFUNCTION(BlueprintCallable, Category = "GamingServices")
 	bool Connect(const FGamingServiceConnectParams& Params);
+
+	UFUNCTION(BlueprintCallable, Category = "GamingServices")
+	void Shutdown();
 
 	// Achievement API
 	UFUNCTION(BlueprintCallable, Category = "GamingServices|Achievements")
@@ -50,6 +69,32 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "GamingServices|Stats")
 	void QueryStat(const FString& StatName);
+
+	// Remote Storage API
+	UFUNCTION(BlueprintCallable, Category = "GamingServices|Cloud")
+	void WriteFile(const FString& FilePath, const TArray<uint8>& Data);
+
+	UFUNCTION(BlueprintCallable, Category = "GamingServices|Cloud")
+	void ReadFile(const FString& FilePath);
+
+	UFUNCTION(BlueprintCallable, Category = "GamingServices|Cloud")
+	void DeleteFile(const FString& FilePath);
+
+	UFUNCTION(BlueprintCallable, Category = "GamingServices|Cloud")
+	void ListFiles(const FString& DirectoryPath);
+
+	// Remote Settings API
+	UFUNCTION(BlueprintCallable, Category = "GamingServices|Settings")
+	void SetRemoteSetting(const FString& Key, const FString& Value);
+
+	UFUNCTION(BlueprintCallable, Category = "GamingServices|Settings")
+	void GetRemoteSetting(const FString& Key);
+
+	UFUNCTION(BlueprintCallable, Category = "GamingServices|Settings")
+	void DeleteRemoteSetting(const FString& Key);
+
+	UFUNCTION(BlueprintCallable, Category = "GamingServices|Settings")
+	void ListRemoteSettings();
 
 	// Auth/query helpers for Blueprints
 	UFUNCTION(BlueprintPure, Category = "GamingServices")
@@ -78,11 +123,27 @@ public:
 	FOnGamingStatProgressed OnStatProgressed;
 	UPROPERTY(BlueprintAssignable, Category = "GamingServices|Events")
 	FOnGamingStatQueried OnStatQueried;
+	UPROPERTY(BlueprintAssignable, Category = "GamingServices|Events")
+	FOnGamingFileWritten OnFileWritten;
+	UPROPERTY(BlueprintAssignable, Category = "GamingServices|Events")
+	FOnGamingFileRead OnFileRead;
+	UPROPERTY(BlueprintAssignable, Category = "GamingServices|Events")
+	FOnGamingFileDeleted OnFileDeleted;
+	UPROPERTY(BlueprintAssignable, Category = "GamingServices|Events")
+	FOnGamingFilesListed OnFilesListed;
+	UPROPERTY(BlueprintAssignable, Category = "GamingServices|Events")
+	FOnGamingRemoteSettingChanged OnRemoteSettingChanged;
+	UPROPERTY(BlueprintAssignable, Category = "GamingServices|Events")
+	FOnGamingRemoteSettingQueried OnRemoteSettingQueried;
+	UPROPERTY(BlueprintAssignable, Category = "GamingServices|Events")
+	FOnGamingRemoteSettingDeleted OnRemoteSettingDeleted;
+	UPROPERTY(BlueprintAssignable, Category = "GamingServices|Events")
+	FOnGamingRemoteSettingsListed OnRemoteSettingsListed;
 
-	IGamingService& GetService() const { return *Service; }
+	FGamingService& GetService() const { return *Service; }
 
 private:
-	TUniquePtr<IGamingService> Service;
+	TUniquePtr<FGamingService> Service;
 
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 	virtual void Deinitialize() override;

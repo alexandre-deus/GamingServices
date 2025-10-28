@@ -1,5 +1,6 @@
 #include "NullGamingService.h"
 #include "GamingServiceTypes.h"
+#include "Misc/Paths.h"
 
 FNullGamingService::FNullGamingService()
 	: bInitialized(false)
@@ -29,10 +30,10 @@ void FNullGamingService::Login(const FGamingServiceLoginParams& Params,
                                TFunction<void(const FGamingServiceResult&)> Callback)
 {
 	UE_LOG(LogTemp, Warning, TEXT("NullGamingService: Login called - no SDK available"));
-	
+
 	FGamingServiceResult Result;
 	Result.bSuccess = true;
-	
+
 	bLoggedIn = true;
 
 	Callback(Result);
@@ -42,20 +43,20 @@ void FNullGamingService::UnlockAchievement(const FString& AchievementId,
                                            TFunction<void(const FGamingServiceResult&)> Callback)
 {
 	UE_LOG(LogTemp, Warning, TEXT("NullGamingService: UnlockAchievement called for %s - no SDK available"), *AchievementId);
-	
+
 	FGamingServiceResult Result;
 	Result.bSuccess = true;
-	
+
 	Callback(Result);
 }
 
 void FNullGamingService::QueryAchievements(TFunction<void(const FAchievementsQueryResult&)> Callback)
 {
 	UE_LOG(LogTemp, Warning, TEXT("NullGamingService: QueryAchievements called - no SDK available"));
-	
+
 	FAchievementsQueryResult Result;
 	Result.bSuccess = true;
-	
+
 	Callback(Result);
 }
 
@@ -63,7 +64,7 @@ void FNullGamingService::WriteLeaderboardScore(const FString& LeaderboardId, int
                                                TFunction<void(const FGamingServiceResult&)> Callback)
 {
 	UE_LOG(LogTemp, Warning, TEXT("NullGamingService: WriteLeaderboardScore called for %s with score %d - no SDK available"), *LeaderboardId, Score);
-	
+
 	FGamingServiceResult Result;
 	Result.bSuccess = true;
 
@@ -74,10 +75,10 @@ void FNullGamingService::QueryLeaderboardPage(const FString& LeaderboardId, int3
                                               TFunction<void(const FLeaderboardResult&)> Callback)
 {
 	UE_LOG(LogTemp, Warning, TEXT("NullGamingService: QueryLeaderboardPage called for %s - no SDK available"), *LeaderboardId);
-	
+
 	FLeaderboardResult Result;
 	Result.bSuccess = true;
-	
+
 	Callback(Result);
 }
 
@@ -85,10 +86,10 @@ void FNullGamingService::IngestStat(const FString& StatName, int32 Amount,
                                     TFunction<void(const FGamingServiceResult&)> Callback)
 {
 	UE_LOG(LogTemp, Warning, TEXT("NullGamingService: IngestStat called for %s with amount %d - no SDK available"), *StatName, Amount);
-	
+
 	FGamingServiceResult Result;
 	Result.bSuccess = true;
-	
+
 	Callback(Result);
 }
 
@@ -96,16 +97,56 @@ void FNullGamingService::QueryStat(const FString& StatName,
                                    TFunction<void(const FStatQueryResult&)> Callback)
 {
 	UE_LOG(LogTemp, Warning, TEXT("NullGamingService: QueryStat called for %s - no SDK available"), *StatName);
-	
+
 	FStatQueryResult Result;
+	Result.bSuccess = true;
+
+	Callback(Result);
+}
+
+void FNullGamingService::WriteFile(const FString& FilePath, const TArray<uint8>& Data,
+                                   TFunction<void(const FGamingServiceResult&)> Callback)
+{
+	UE_LOG(LogTemp, Warning, TEXT("NullGamingService: WriteFile called for %s (%d bytes) - no SDK available"), *FilePath, Data.Num());
+	
+	FGamingServiceResult Result;
 	Result.bSuccess = true;
 	
 	Callback(Result);
 }
 
+void FNullGamingService::ReadFile(const FString& FilePath,
+                                  TFunction<void(const FFileReadResult&)> Callback)
+{
+	UE_LOG(LogTemp, Warning, TEXT("NullGamingService: ReadFile called for %s - no SDK available"), *FilePath);
+
+	Callback(FFileReadResult::Success(FilePath, TArray<uint8>()));
+}
+
+void FNullGamingService::DeleteFile(const FString& FilePath,
+                                    TFunction<void(const FGamingServiceResult&)> Callback)
+{
+	UE_LOG(LogTemp, Warning, TEXT("NullGamingService: DeleteFile called for %s - no SDK available"), *FilePath);
+
+	FGamingServiceResult Result;
+	Result.bSuccess = true;
+
+	Callback(Result);
+}
+
+void FNullGamingService::ListFiles(const FString& DirectoryPath,
+                                   TFunction<void(const FFilesListResult&)> Callback)
+{
+	UE_LOG(LogTemp, Warning, TEXT("NullGamingService: ListFiles called for %s - no SDK available"), *DirectoryPath);
+
+	FFilesListResult Result;
+	Result.bSuccess = true;
+
+	Callback(Result);
+}
+
 void FNullGamingService::Tick()
 {
-	// No-op for null service
 }
 
 bool FNullGamingService::IsInitialized() const

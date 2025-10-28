@@ -1,10 +1,11 @@
+
 #pragma once
 
 #include "CoreMinimal.h"
-#include "IGamingService.h"
+#include "FGamingService.h"
 #include "GamingServiceTypes.h"
 
-class GAMINGSERVICES_API FEOSGamingService : public IGamingService
+class GAMINGSERVICES_API FEOSGamingService : public FGamingService
 {
 public:
 	FEOSGamingService();
@@ -28,6 +29,18 @@ public:
 	                        TFunction<void(const FGamingServiceResult&)> Callback) override;
 	virtual void QueryStat(const FString& StatName,
 	                       TFunction<void(const FStatQueryResult&)> Callback) override;
+
+	virtual void WriteFile(const FString& FilePath, const TArray<uint8>& Data,
+	                       TFunction<void(const FGamingServiceResult&)> Callback) override;
+	virtual void ReadFile(const FString& FilePath,
+	                      TFunction<void(const FFileReadResult&)> Callback) override;
+	virtual void DeleteFile(const FString& FilePath,
+	                        TFunction<void(const FGamingServiceResult&)> Callback) override;
+	virtual void ListFiles(const FString& DirectoryPath,
+	                       TFunction<void(const FFilesListResult&)> Callback) override;
+
+	void SetTempStoragePath(const FString& InPath);
+	const FString& GetTempStoragePath() const;
 
 	virtual void Tick() override;
 

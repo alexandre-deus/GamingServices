@@ -5,6 +5,10 @@
 #include "HAL/PlatformFilemanager.h"
 #include "Misc/Paths.h"
 #include "Misc/ConfigCacheIni.h"
+#include "Misc/FileHelper.h"
+#include "Serialization/JsonSerializer.h"
+#include "Serialization/JsonWriter.h"
+#include "Dom/JsonObject.h"
 
 #include "eos_sdk.h"
 #include "eos_common.h"
@@ -14,6 +18,7 @@
 #include "eos_leaderboards.h"
 #include "eos_connect.h"
 #include "eos_logging.h"
+#include "eos_playerdatastorage.h"
 
 template <typename TResult, typename TOwner>
 struct TEOSCallbackContext
@@ -47,10 +52,15 @@ using FStatQueryCallbackCtx = TEOSCallbackContext<FStatQueryResult, FEOSGamingSe
 using FLeaderboardCallbackCtx = TEOSCallbackContext<FLeaderboardResult, FEOSGamingService>;
 using FAchievementDefinitionsCallbackCtx = TEOSCallbackContext<bool, FEOSGamingService>;
 using FLeaderboardDefinitionsCallbackCtx = TEOSCallbackContext<bool, FEOSGamingService>;
+using FFileStorageCallbackCtx = TEOSCallbackContext<FGamingServiceResult, FEOSGamingService>;
+using FFilesListCallbackCtx = TEOSCallbackContext<FFilesListResult, FEOSGamingService>;
 
 class FEOSGamingService::FEOSGamingServiceImpl
 {
 public:
+	static constexpr const TCHAR* CloudStorageDirectoryName = TEXT("EOSRemoteStorage");
+	static constexpr const TCHAR* ManifestFileName = TEXT("manifest.json");
+
 	FEOSGamingServiceImpl(FEOSGamingService* InOwner)
 		: Owner(InOwner)
 	{
@@ -58,7 +68,6 @@ public:
 
 	~FEOSGamingServiceImpl()
 	{
-		ShutdownEOSPlatform();
 	}
 
 	bool Connect(const FEOSInitOptions& EOSOpts)
@@ -77,6 +86,12 @@ public:
 			return false;
 		}
 
+		if (TempStoragePath.IsEmpty())
+		{
+			TempStoragePath = FPaths::ProjectSavedDir() / CloudStorageDirectoryName;
+			IFileManager::Get().MakeDirectory(*TempStoragePath, true);
+		}
+
 		bIsInitialized = true;
 		UE_LOG(LogTemp, Log, TEXT("EOSGamingService: EOS platform initialized successfully"));
 		return true;
@@ -85,6 +100,45 @@ public:
 	void Shutdown()
 	{
 		UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Starting shutdown..."));
+
+		if (bIsLoggedIn && ProductUserId && PlayerDataStorageHandle)
+		{
+			UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Syncing to cloud before shutdown..."));
+
+			bool bSyncCompleted = false;
+			bool bSyncSuccess = false;
+
+			SyncToCloud([&bSyncCompleted, &bSyncSuccess](const FGamingServiceResult& Result)
+			{
+				bSyncSuccess = Result.bSuccess;
+				bSyncCompleted = true;
+				if (Result.bSuccess)
+				{
+					UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Shutdown sync to cloud completed successfully"));
+				}
+				else
+				{
+					UE_LOG(LogTemp, Warning, TEXT("EOSGamingService: Shutdown sync to cloud failed"));
+				}
+			});
+
+			while (!bSyncCompleted)
+			{
+				if (PlatformHandle)
+				{
+					EOS_Platform_Tick(PlatformHandle);
+				}
+			}
+
+			if (!bSyncCompleted)
+			{
+				UE_LOG(LogTemp, Warning, TEXT("EOSGamingService: Shutdown sync to cloud timed out"));
+			}
+		}
+		else
+		{
+			UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Skipping cloud sync - not logged in or handles not valid"));
+		}
 
 		ShutdownEOSPlatform();
 
@@ -147,7 +201,6 @@ public:
 
 		auto* Ctx = FAchievementsQueryCallbackCtx::Create(Owner, MoveTemp(Callback));
 
-		// Query player achievements directly using cached definitions
 		EOS_Achievements_QueryPlayerAchievementsOptions PlayerOpts = {};
 		PlayerOpts.ApiVersion = EOS_ACHIEVEMENTS_QUERYPLAYERACHIEVEMENTS_API_LATEST;
 		PlayerOpts.LocalUserId = ProductUserId;
@@ -173,7 +226,6 @@ public:
 					return;
 				}
 
-				// Gather definitions into FGameAchievement array
 				TArray<FGameAchievement> Achievements;
 				for (const auto& DefinitionPair : Service->Impl->AchievementDefinitions)
 				{
@@ -202,7 +254,6 @@ public:
 
 		UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Writing leaderboard score: %d to %s"), Score, *LeaderboardId);
 
-		// Find the leaderboard definition by name
 		EOS_Leaderboards_Definition* LeaderboardDef = nullptr;
 		if (LeaderboardDefinitions.Contains(LeaderboardId))
 		{
@@ -216,7 +267,6 @@ public:
 			return;
 		}
 
-		// Get the stat name from the leaderboard definition
 		FString StatName = UTF8_TO_TCHAR(LeaderboardDef->StatName);
 		UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Found stat name '%s' for leaderboard '%s'"), *StatName,
 		       *LeaderboardId);
@@ -430,10 +480,114 @@ public:
 				}
 				Result.Entries = Entries;
 				Result.TotalEntries = RecordCount;
-				Result.ContinuationToken = EndIndex < RecordCount ? EndIndex : -1; // -1 indicates no more entries
+				Result.ContinuationToken = EndIndex < RecordCount ? EndIndex : -1;
 				FLeaderboardCallbackCtx::Complete(LocalCtx, Result);
 			}
 		);
+	}
+
+	void WriteFile(const FString& FilePath, const TArray<uint8>& Data,
+	               TFunction<void(const FGamingServiceResult&)> Callback)
+	{
+		checkf(bIsInitialized, TEXT("EOSGamingService: WriteFile called when service not ready"));
+
+		UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Writing file to cloud storage: %s (%d bytes)"), *FilePath, Data.Num());
+
+		FString FullPath = GetFullLocalPath(FilePath);
+
+		if (!FFileHelper::SaveArrayToFile(Data, *FullPath))
+		{
+			UE_LOG(LogTemp, Error, TEXT("EOSGamingService: Failed to write to cloud storage: %s"), *FullPath);
+			Callback(FGamingServiceResult(false));
+			return;
+		}
+
+		UE_LOG(LogTemp, Log, TEXT("EOSGamingService: File written to cloud storage successfully"));
+		Callback(FGamingServiceResult(true));
+	}
+
+	void ReadFile(const FString& FilePath,
+	              TFunction<void(const FFileReadResult&)> Callback)
+	{
+		checkf(bIsInitialized, TEXT("EOSGamingService: ReadFile called when service not ready"));
+
+		UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Reading file from cloud storage: %s"), *FilePath);
+
+		FString FullPath = GetFullLocalPath(FilePath);
+
+		TArray<uint8> FileData;
+		if (!FFileHelper::LoadFileToArray(FileData, *FullPath))
+		{
+			UE_LOG(LogTemp, Error, TEXT("EOSGamingService: Failed to read from cloud storage: %s"), *FullPath);
+			Callback(FFileReadResult::Failure(FilePath));
+			return;
+		}
+
+		UE_LOG(LogTemp, Log, TEXT("EOSGamingService: File read from cloud storage successfully (%d bytes)"), FileData.Num());
+		Callback(FFileReadResult::Success(FilePath, FileData));
+	}
+
+	void DeleteFile(const FString& FilePath,
+	                TFunction<void(const FGamingServiceResult&)> Callback)
+	{
+		checkf(bIsInitialized, TEXT("EOSGamingService: DeleteFile called when service not ready"));
+
+		UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Deleting file from local storage: %s"), *FilePath);
+
+		FString FullPath = GetFullLocalPath(FilePath);
+
+		if (IFileManager::Get().Delete(*FullPath))
+		{
+			UE_LOG(LogTemp, Log, TEXT("EOSGamingService: File deleted from local storage successfully"));
+			Callback(FGamingServiceResult(true));
+		}
+		else
+		{
+			UE_LOG(LogTemp, Warning, TEXT("EOSGamingService: Failed to delete file from local storage: %s"), *FullPath);
+			Callback(FGamingServiceResult(false));
+		}
+	}
+
+	void ListFiles(const FString& DirectoryPath,
+	               TFunction<void(const FFilesListResult&)> Callback)
+	{
+		checkf(bIsInitialized, TEXT("EOSGamingService: ListFiles called when service not ready"));
+
+		UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Listing files in local storage directory: %s"), *DirectoryPath);
+
+		FString FullDirectoryPath = TempStoragePath.IsEmpty() ? DirectoryPath : (TempStoragePath / DirectoryPath);
+
+		FFilesListResult Result;
+		Result.bSuccess = true;
+
+		if (!FPaths::DirectoryExists(FullDirectoryPath))
+		{
+			UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Directory does not exist: %s"), *FullDirectoryPath);
+			Callback(Result);
+			return;
+		}
+
+		TArray<FString> FoundFiles;
+		IFileManager::Get().FindFiles(FoundFiles, *(FullDirectoryPath / TEXT("*")), true, false);
+
+		for (const FString& File : FoundFiles)
+		{
+			FString FilePath = DirectoryPath.IsEmpty() ? File : (DirectoryPath / File);
+			FString FullFilePath = FullDirectoryPath / File;
+
+			FFileBlobData FileData;
+			FileData.FilePath = FilePath;
+
+			const int64 FileSize = IFileManager::Get().FileSize(*FullFilePath);
+			FileData.Size = FileSize > 0 ? FileSize : 0;
+
+			FileData.LastModified = IFileManager::Get().GetTimeStamp(*FullFilePath);
+
+			Result.Files.Add(FileData);
+		}
+
+		UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Found %d files in local storage"), Result.Files.Num());
+		Callback(Result);
 	}
 
 	void Tick()
@@ -545,7 +699,7 @@ public:
 		EOS_Connect_LoginOptions ConnLoginOpts = {};
 		ConnLoginOpts.ApiVersion = EOS_CONNECT_LOGIN_API_LATEST;
 		ConnLoginOpts.Credentials = &ConnectCreds;
-		ConnLoginOpts.UserLoginInfo = nullptr; // Not required for EPIC credentials
+		ConnLoginOpts.UserLoginInfo = nullptr;
 
 		auto* Ctx = FAuthCallbackCtx::Create(Owner, MoveTemp(Callback));
 
@@ -586,15 +740,14 @@ public:
 private:
 	FEOSGamingService* Owner;
 
-	// EOS handles
 	EOS_HPlatform PlatformHandle = nullptr;
 	EOS_HAuth AuthHandle = nullptr;
 	EOS_HAchievements AchievementsHandle = nullptr;
 	EOS_HLeaderboards LeaderboardsHandle = nullptr;
 	EOS_HStats StatsHandle = nullptr;
 	EOS_HConnect ConnectHandle = nullptr;
+	EOS_HPlayerDataStorage PlayerDataStorageHandle = nullptr;
 
-	// Internal state
 	bool bIsInitialized = false;
 	bool bIsConnected = false;
 	bool bIsLoggedIn = false;
@@ -604,7 +757,8 @@ private:
 	EOS_EpicAccountId EpicAccountIdCached = nullptr;
 	EOS_ProductUserId ProductUserId = nullptr;
 
-	// Cached definitions
+	FString TempStoragePath;
+
 	TMap<FString, EOS_Achievements_DefinitionV2*> AchievementDefinitions;
 	TMap<FString, EOS_Leaderboards_Definition*> LeaderboardDefinitions;
 	bool bDefinitionsLoaded = false;
@@ -644,14 +798,21 @@ private:
 
 	bool InitializeEOSPlatform(const FEOSInitOptions& EOSOpts)
 	{
-		// Validate required fields were provided by caller
 		if (EOSOpts.ProductName.IsEmpty() || EOSOpts.ProductVersion.IsEmpty() ||
 			EOSOpts.ProductId.IsEmpty() || EOSOpts.SandboxId.IsEmpty() ||
 			EOSOpts.DeploymentId.IsEmpty() || EOSOpts.ClientId.IsEmpty() ||
-			EOSOpts.ClientSecret.IsEmpty())
+			EOSOpts.ClientSecret.IsEmpty() || EOSOpts.EncryptionKey.IsEmpty())
 		{
 			UE_LOG(LogTemp, Error,
 			       TEXT("EOSGamingService: EOS options incomplete. Provide all required fields in Initialize params."));
+			UE_LOG(LogTemp, Error,
+			       TEXT(
+				       "  Required: ProductName, ProductVersion, ProductId, SandboxId, DeploymentId, ClientId, ClientSecret, EncryptionKey"
+			       ));
+			if (EOSOpts.EncryptionKey.IsEmpty())
+			{
+				UE_LOG(LogTemp, Error, TEXT("  Missing EncryptionKey! Generate one with: openssl rand -hex 32"));
+			}
 			return false;
 		}
 
@@ -669,11 +830,9 @@ private:
 			return false;
 		}
 
-		// Configure EOS logging
 		EOS_Logging_SetCallback(OnEOSLogMessage);
 		EOS_Logging_SetLogLevel(EOS_ELogCategory::EOS_LC_ALL_CATEGORIES, EOS_ELogLevel::EOS_LOG_Verbose);
 
-		// Create platform
 		EOS_Platform_Options PlatformOptions = {};
 		// For some reason Epic games made the latest version be 14 in this macro but the binaries say it only goes up to 13...
 		//PlatformOptions.ApiVersion = EOS_PLATFORM_OPTIONS_API_LATEST;
@@ -690,7 +849,44 @@ private:
 		PlatformOptions.ClientCredentials.ClientId = ClientIdUtf8.empty() ? nullptr : ClientIdUtf8.c_str();
 		PlatformOptions.ClientCredentials.ClientSecret = ClientSecretUtf8.empty() ? nullptr : ClientSecretUtf8.c_str();
 
-		// Set cache directory
+		PlatformOptions.bIsServer = EOS_FALSE;
+		PlatformOptions.OverrideCountryCode = nullptr;
+		PlatformOptions.OverrideLocaleCode = nullptr;
+		PlatformOptions.Flags = 0;
+		PlatformOptions.TickBudgetInMilliseconds = 0;
+		PlatformOptions.RTCOptions = nullptr;
+		PlatformOptions.IntegratedPlatformOptionsContainerHandle = nullptr;
+		PlatformOptions.SystemSpecificOptions = nullptr;
+		PlatformOptions.TaskNetworkTimeoutSeconds = nullptr;
+
+		std::string EncryptionKeyUtf8 = TCHAR_TO_UTF8(*EOSOpts.EncryptionKey);
+		if (EncryptionKeyUtf8.length() != 64)
+		{
+			UE_LOG(LogTemp, Error,
+			       TEXT(
+				       "EOSGamingService: Invalid EncryptionKey length (%d). Must be exactly 64 hexadecimal characters."
+			       ),
+			       EncryptionKeyUtf8.length());
+			UE_LOG(LogTemp, Error, TEXT("  Generate a valid key with: openssl rand -hex 32"));
+			return false;
+		}
+
+		for (char c : EncryptionKeyUtf8)
+		{
+			if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')))
+			{
+				UE_LOG(LogTemp, Error,
+				       TEXT(
+					       "EOSGamingService: Invalid EncryptionKey format. Must contain only hexadecimal characters (0-9, a-f, A-F)."
+				       ));
+				UE_LOG(LogTemp, Error, TEXT("  Generate a valid key with: openssl rand -hex 32"));
+				return false;
+			}
+		}
+
+		PlatformOptions.EncryptionKey = EncryptionKeyUtf8.c_str();
+		UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Using encryption key for PlayerDataStorage"));
+
 		FString CacheDir = FPaths::ProjectSavedDir() / TEXT("EOSCache");
 		FPaths::MakeStandardFilename(CacheDir);
 		FPaths::ConvertRelativePathToFull(CacheDir);
@@ -708,12 +904,12 @@ private:
 			return false;
 		}
 
-		// Get interface handles
 		AuthHandle = EOS_Platform_GetAuthInterface(PlatformHandle);
 		AchievementsHandle = EOS_Platform_GetAchievementsInterface(PlatformHandle);
 		LeaderboardsHandle = EOS_Platform_GetLeaderboardsInterface(PlatformHandle);
 		StatsHandle = EOS_Platform_GetStatsInterface(PlatformHandle);
 		ConnectHandle = EOS_Platform_GetConnectInterface(PlatformHandle);
+		PlayerDataStorageHandle = EOS_Platform_GetPlayerDataStorageInterface(PlatformHandle);
 
 		UE_LOG(LogTemp, Log, TEXT("EOSGamingService: EOS platform created successfully"));
 		return true;
@@ -721,7 +917,6 @@ private:
 
 	void ShutdownEOSPlatform()
 	{
-		// Clean up cached definitions
 		for (auto& Pair : AchievementDefinitions)
 		{
 			if (Pair.Value)
@@ -741,14 +936,12 @@ private:
 		LeaderboardDefinitions.Empty();
 		bDefinitionsLoaded = false;
 
-		// Release the platform handle
 		if (PlatformHandle)
 		{
 			EOS_Platform_Release(PlatformHandle);
 			PlatformHandle = nullptr;
 		}
 
-		// Shutdown the SDK if we initialized it
 		if (bEOSSDKInitialized)
 		{
 			EOS_Shutdown();
@@ -964,9 +1157,729 @@ private:
 				}
 
 				bDefinitionsLoaded = true;
-				UE_LOG(LogTemp, Log, TEXT("EOSGamingService: All definitions loaded, authentication complete"));
-				FAuthCallbackCtx::Complete(AuthCtx, FGamingServiceResult(true));
+				UE_LOG(LogTemp, Log, TEXT("EOSGamingService: All definitions loaded, starting cloud sync..."));
+
+				SyncFromCloud([this, AuthCtx](const FGamingServiceResult& SyncResult)
+				{
+					if (!SyncResult.bSuccess)
+					{
+						UE_LOG(LogTemp, Warning,
+						       TEXT("EOSGamingService: Cloud sync failed, but continuing with login"));
+					}
+					else
+					{
+						UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Cloud sync completed successfully"));
+					}
+
+					UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Authentication complete"));
+					FAuthCallbackCtx::Complete(AuthCtx, FGamingServiceResult(true));
+				});
 			});
+		});
+	}
+
+public:
+	FString GetFullLocalPath(const FString& RelativePath) const
+	{
+		if (TempStoragePath.IsEmpty())
+		{
+			return FPaths::ProjectSavedDir() / CloudStorageDirectoryName / RelativePath;
+		}
+		return TempStoragePath / RelativePath;
+	}
+
+	void SetTempStoragePath(const FString& InPath)
+	{
+		TempStoragePath = InPath;
+		IFileManager::Get().MakeDirectory(*TempStoragePath, true);
+		UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Set temp storage path to: %s"), *TempStoragePath);
+	}
+
+	const FString& GetTempStoragePath() const
+	{
+		return TempStoragePath;
+	}
+
+	struct FFileManifestEntry
+	{
+		int64 Timestamp;
+		int64 Size;
+	};
+
+	struct FCloudManifest
+	{
+		TMap<FString, FFileManifestEntry> Files;
+		int64 LastSyncTime = 0;
+
+		FString ToJson() const
+		{
+			TSharedPtr<FJsonObject> RootObject = MakeShareable(new FJsonObject());
+
+			TSharedPtr<FJsonObject> FilesObject = MakeShareable(new FJsonObject());
+			for (const auto& Pair : Files)
+			{
+				TSharedPtr<FJsonObject> FileEntry = MakeShareable(new FJsonObject());
+				FileEntry->SetNumberField(TEXT("timestamp"), Pair.Value.Timestamp);
+				FileEntry->SetNumberField(TEXT("size"), Pair.Value.Size);
+				FilesObject->SetObjectField(Pair.Key, FileEntry);
+			}
+
+			RootObject->SetObjectField(TEXT("files"), FilesObject);
+			RootObject->SetNumberField(TEXT("last_sync_time"), LastSyncTime);
+
+			FString OutputString;
+			TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&OutputString);
+			if (FJsonSerializer::Serialize(RootObject.ToSharedRef(), Writer))
+			{
+				return OutputString;
+			}
+			return TEXT("{}");
+		}
+
+		bool FromJson(const FString& JsonString)
+		{
+			Files.Empty();
+			LastSyncTime = 0;
+
+			TSharedPtr<FJsonObject> RootObject;
+			TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(JsonString);
+
+			if (!FJsonSerializer::Deserialize(Reader, RootObject) || !RootObject.IsValid())
+			{
+				return false;
+			}
+
+			if (RootObject->HasTypedField<EJson::Number>(TEXT("last_sync_time")))
+			{
+				LastSyncTime = static_cast<int64>(RootObject->GetNumberField(TEXT("last_sync_time")));
+			}
+
+			if (RootObject->HasTypedField<EJson::Object>(TEXT("files")))
+			{
+				TSharedPtr<FJsonObject> FilesObject = RootObject->GetObjectField(TEXT("files"));
+				for (const auto& FilePair : FilesObject->Values)
+				{
+					if (FilePair.Value->Type == EJson::Object)
+					{
+						TSharedPtr<FJsonObject> FileEntry = FilePair.Value->AsObject();
+
+						FFileManifestEntry Entry;
+						Entry.Timestamp = static_cast<int64>(FileEntry->GetNumberField(TEXT("timestamp")));
+						Entry.Size = static_cast<int64>(FileEntry->GetNumberField(TEXT("size")));
+
+						Files.Add(FilePair.Key, Entry);
+					}
+				}
+			}
+
+			return true;
+		}
+	};
+
+	FCloudManifest BuildLocalManifest()
+	{
+		FCloudManifest Manifest;
+		FString BasePath = TempStoragePath.IsEmpty()
+			                   ? (FPaths::ProjectSavedDir() / CloudStorageDirectoryName)
+			                   : TempStoragePath;
+
+		if (!FPaths::DirectoryExists(BasePath))
+		{
+			return Manifest;
+		}
+
+		TArray<FString> LocalFiles;
+		IFileManager::Get().FindFilesRecursive(LocalFiles, *BasePath, TEXT("*"), true, false);
+
+		FString BasePathWithSlash = BasePath;
+		if (!BasePathWithSlash.EndsWith(TEXT("/")) && !BasePathWithSlash.EndsWith(TEXT("\\")))
+		{
+			BasePathWithSlash += TEXT("/");
+		}
+
+		for (const FString& FullPath : LocalFiles)
+		{
+			FString RelativePath = FullPath;
+			if (RelativePath.StartsWith(BasePathWithSlash))
+			{
+				RelativePath = RelativePath.RightChop(BasePathWithSlash.Len());
+			}
+			else if (RelativePath.StartsWith(BasePath))
+			{
+				RelativePath = RelativePath.RightChop(BasePath.Len());
+				if (RelativePath.StartsWith(TEXT("/")) || RelativePath.StartsWith(TEXT("\\")))
+				{
+					RelativePath = RelativePath.RightChop(1);
+				}
+			}
+
+			if (RelativePath == ManifestFileName)
+				continue;
+
+			FFileManifestEntry Entry;
+			Entry.Timestamp = IFileManager::Get().GetTimeStamp(*FullPath).ToUnixTimestamp();
+			Entry.Size = IFileManager::Get().FileSize(*FullPath);
+
+			if (Entry.Size > 0)
+			{
+				Manifest.Files.Add(RelativePath, Entry);
+			}
+		}
+
+		Manifest.LastSyncTime = FDateTime::UtcNow().ToUnixTimestamp();
+		return Manifest;
+	}
+
+	bool SaveLocalManifest(const FCloudManifest& Manifest)
+	{
+		FString BasePath = TempStoragePath.IsEmpty()
+			                   ? (FPaths::ProjectSavedDir() / CloudStorageDirectoryName)
+			                   : TempStoragePath;
+		FString ManifestPath = BasePath / ManifestFileName;
+
+		IFileManager::Get().MakeDirectory(*BasePath, true);
+		return FFileHelper::SaveStringToFile(Manifest.ToJson(), *ManifestPath);
+	}
+
+	bool LoadLocalManifest(FCloudManifest& OutManifest)
+	{
+		FString BasePath = TempStoragePath.IsEmpty()
+			                   ? (FPaths::ProjectSavedDir() / CloudStorageDirectoryName)
+			                   : TempStoragePath;
+		FString ManifestPath = BasePath / ManifestFileName;
+
+		FString JsonContent;
+		if (!FFileHelper::LoadFileToString(JsonContent, *ManifestPath))
+		{
+			return false;
+		}
+
+		return OutManifest.FromJson(JsonContent);
+	}
+
+	void DownloadFromCloudGeneric(const FString& FileName, TFunction<void(bool, const TArray<uint8>&)> Callback)
+	{
+		if (!bIsLoggedIn || !ProductUserId || !PlayerDataStorageHandle)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("EOSGamingService: Cannot download file %s - not logged in"), *FileName);
+			Callback(false, TArray<uint8>());
+			return;
+		}
+
+		struct FGenericDownloadCtx : FFileStorageCallbackCtx
+		{
+			FString FileName;
+			TArray<uint8> FileData;
+			TFunction<void(bool, const TArray<uint8>&)> DownloadCallback;
+		};
+		auto* Ctx = new FGenericDownloadCtx{};
+		Ctx->Service = Owner;
+		Ctx->FileName = FileName;
+		Ctx->DownloadCallback = MoveTemp(Callback);
+
+		EOS_PlayerDataStorage_ReadFileOptions ReadOptions = {};
+		ReadOptions.ApiVersion = 1;
+		ReadOptions.LocalUserId = ProductUserId;
+		ReadOptions.Filename = TCHAR_TO_UTF8(*FileName);
+		ReadOptions.ReadChunkLengthBytes = 1024 * 1024;
+		ReadOptions.ReadFileDataCallback = [](
+			const EOS_PlayerDataStorage_ReadFileDataCallbackInfo* Data) -> EOS_PlayerDataStorage_EReadResult
+			{
+				if (Data && Data->ClientData)
+				{
+					auto* LocalCtx = static_cast<FGenericDownloadCtx*>(Data->ClientData);
+					if (Data->DataChunk && Data->DataChunkLengthBytes > 0)
+					{
+						LocalCtx->FileData.Append(static_cast<const uint8*>(Data->DataChunk),
+						                          Data->DataChunkLengthBytes);
+					}
+				}
+				return EOS_PlayerDataStorage_EReadResult::EOS_RR_ContinueReading;
+			};
+		ReadOptions.FileTransferProgressCallback = nullptr;
+
+		EOS_PlayerDataStorage_ReadFile(
+			PlayerDataStorageHandle,
+			&ReadOptions,
+			Ctx,
+			[](const EOS_PlayerDataStorage_ReadFileCallbackInfo* Data)
+			{
+				check(Data);
+				check(Data->ClientData);
+				auto* LocalCtx = static_cast<FGenericDownloadCtx*>(Data->ClientData);
+
+				bool bSuccess = (Data->ResultCode == EOS_EResult::EOS_Success);
+				if (!bSuccess && Data->ResultCode != EOS_EResult::EOS_NotFound)
+				{
+					UE_LOG(LogTemp, Error, TEXT("EOSGamingService: Failed to download %s: %d"), *LocalCtx->FileName,
+					       (int32)Data->ResultCode);
+				}
+
+				LocalCtx->DownloadCallback(bSuccess, LocalCtx->FileData);
+				delete LocalCtx;
+			}
+		);
+	}
+
+	void UploadToCloudGeneric(const FString& FileName, const TArray<uint8>& FileData, TFunction<void(bool)> Callback)
+	{
+		if (!bIsLoggedIn || !ProductUserId || !PlayerDataStorageHandle)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("EOSGamingService: Cannot upload file %s - not logged in"), *FileName);
+			Callback(false);
+			return;
+		}
+
+		struct FGenericUploadCtx : FFileStorageCallbackCtx
+		{
+			TArray<uint8> FileData;
+			uint32_t CurrentOffset = 0;
+			FString FileName;
+			TFunction<void(bool)> UploadCallback;
+		};
+		auto* Ctx = new FGenericUploadCtx{};
+		Ctx->Service = Owner;
+		Ctx->FileData = FileData;
+		Ctx->FileName = FileName;
+		Ctx->UploadCallback = MoveTemp(Callback);
+
+		EOS_PlayerDataStorage_WriteFileOptions WriteOptions = {};
+		WriteOptions.ApiVersion = 1;
+		WriteOptions.LocalUserId = ProductUserId;
+		WriteOptions.Filename = TCHAR_TO_UTF8(*FileName);
+		WriteOptions.ChunkLengthBytes = 4096;
+		WriteOptions.WriteFileDataCallback = [](const EOS_PlayerDataStorage_WriteFileDataCallbackInfo* Data,
+		                                        void* OutDataBuffer,
+		                                        uint32_t* OutDataWritten) -> EOS_PlayerDataStorage_EWriteResult
+		{
+			if (Data && Data->ClientData && OutDataBuffer && OutDataWritten)
+			{
+				auto* LocalCtx = static_cast<FGenericUploadCtx*>(Data->ClientData);
+				const uint32_t RemainingBytes = LocalCtx->FileData.Num() - LocalCtx->CurrentOffset;
+				const uint32_t BytesToWrite = FMath::Min(Data->DataBufferLengthBytes, RemainingBytes);
+
+				if (BytesToWrite > 0)
+				{
+					FMemory::Memcpy(OutDataBuffer, LocalCtx->FileData.GetData() + LocalCtx->CurrentOffset,
+					                BytesToWrite);
+					LocalCtx->CurrentOffset += BytesToWrite;
+					*OutDataWritten = BytesToWrite;
+					return EOS_PlayerDataStorage_EWriteResult::EOS_WR_ContinueWriting;
+				}
+			}
+			*OutDataWritten = 0;
+			return EOS_PlayerDataStorage_EWriteResult::EOS_WR_CompleteRequest;
+		};
+		WriteOptions.FileTransferProgressCallback = nullptr;
+
+		EOS_PlayerDataStorage_WriteFile(
+			PlayerDataStorageHandle,
+			&WriteOptions,
+			Ctx,
+			[](const EOS_PlayerDataStorage_WriteFileCallbackInfo* Data)
+			{
+				check(Data);
+				check(Data->ClientData);
+				auto* LocalCtx = static_cast<FGenericUploadCtx*>(Data->ClientData);
+
+				bool bSuccess = (Data->ResultCode == EOS_EResult::EOS_Success);
+				if (!bSuccess)
+				{
+					UE_LOG(LogTemp, Error, TEXT("EOSGamingService: Failed to upload %s: %d"), *LocalCtx->FileName,
+					       (int32)Data->ResultCode);
+				}
+
+				LocalCtx->UploadCallback(bSuccess);
+				delete LocalCtx;
+			}
+		);
+	}
+
+	void DownloadManifestFromCloud(TFunction<void(bool, const FCloudManifest&)> Callback)
+	{
+		DownloadFromCloudGeneric(ManifestFileName, [Callback](bool bSuccess, const TArray<uint8>& FileData)
+		{
+			FCloudManifest Manifest;
+
+			if (bSuccess && FileData.Num() > 0)
+			{
+				FString JsonContent;
+				FFileHelper::BufferToString(JsonContent, FileData.GetData(), FileData.Num());
+				bSuccess = Manifest.FromJson(JsonContent);
+
+				if (bSuccess)
+				{
+					UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Downloaded manifest from cloud with %d files"),
+					       Manifest.Files.Num());
+				}
+			}
+			else if (bSuccess && FileData.Num() == 0)
+			{
+				UE_LOG(LogTemp, Log, TEXT("EOSGamingService: No manifest found in cloud (first sync)"));
+				bSuccess = true;
+			}
+
+			Callback(bSuccess, Manifest);
+		});
+	}
+
+	void UploadManifestToCloud(const FCloudManifest& Manifest, TFunction<void(bool)> Callback)
+	{
+		FString JsonContent = Manifest.ToJson();
+		TArray<uint8> FileData;
+		FileData.Append((uint8*)TCHAR_TO_UTF8(*JsonContent), JsonContent.Len());
+
+		UploadToCloudGeneric(ManifestFileName, FileData, [Callback](bool bSuccess)
+		{
+			if (bSuccess)
+			{
+				UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Uploaded manifest to cloud"));
+			}
+			Callback(bSuccess);
+		});
+	}
+
+	void DownloadFileFromCloud(const FString& FileName, TFunction<void(bool)> Callback)
+	{
+		DownloadFromCloudGeneric(FileName, [this, FileName, Callback](bool bSuccess, const TArray<uint8>& FileData)
+		{
+			if (bSuccess && FileData.Num() > 0)
+			{
+				FString FullPath = GetFullLocalPath(FileName);
+				FString Directory = FPaths::GetPath(FullPath);
+				IFileManager::Get().MakeDirectory(*Directory, true);
+
+				if (FFileHelper::SaveArrayToFile(FileData, *FullPath))
+				{
+					UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Downloaded file: %s"), *FileName);
+					Callback(true);
+					return;
+				}
+				else
+				{
+					UE_LOG(LogTemp, Error, TEXT("EOSGamingService: Failed to save downloaded file: %s"), *FileName);
+				}
+			}
+
+			Callback(false);
+		});
+	}
+
+	void UploadFileToCloud(const FString& FileName, TFunction<void(bool)> Callback)
+	{
+		FString FullPath = GetFullLocalPath(FileName);
+
+		TArray<uint8> FileData;
+		if (!FFileHelper::LoadFileToArray(FileData, *FullPath))
+		{
+			UE_LOG(LogTemp, Error, TEXT("EOSGamingService: Failed to read file for upload: %s"), *FileName);
+			Callback(false);
+			return;
+		}
+
+		UploadToCloudGeneric(FileName, FileData, [FileName, Callback](bool bSuccess)
+		{
+			if (bSuccess)
+			{
+				UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Uploaded file: %s"), *FileName);
+			}
+			Callback(bSuccess);
+		});
+	}
+
+	void DeleteFileFromCloud(const FString& FileName, TFunction<void(bool)> Callback)
+	{
+		if (!bIsLoggedIn || !ProductUserId || !PlayerDataStorageHandle)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("EOSGamingService: Cannot delete file %s - not logged in"), *FileName);
+			Callback(false);
+			return;
+		}
+
+		struct FDeleteCtx : FFileStorageCallbackCtx
+		{
+			FString FileName;
+			TFunction<void(bool)> DeleteCallback;
+		};
+		auto* Ctx = new FDeleteCtx{};
+		Ctx->Service = Owner;
+		Ctx->FileName = FileName;
+		Ctx->DeleteCallback = MoveTemp(Callback);
+
+		EOS_PlayerDataStorage_DeleteFileOptions DeleteOptions = {};
+		DeleteOptions.ApiVersion = 1;
+		DeleteOptions.LocalUserId = ProductUserId;
+		DeleteOptions.Filename = TCHAR_TO_UTF8(*FileName);
+
+		EOS_PlayerDataStorage_DeleteFile(
+			PlayerDataStorageHandle,
+			&DeleteOptions,
+			Ctx,
+			[](const EOS_PlayerDataStorage_DeleteFileCallbackInfo* Data)
+			{
+				check(Data);
+				check(Data->ClientData);
+				auto* LocalCtx = static_cast<FDeleteCtx*>(Data->ClientData);
+
+				bool bSuccess = (Data->ResultCode == EOS_EResult::EOS_Success);
+				if (bSuccess)
+				{
+					UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Deleted file from cloud: %s"), *LocalCtx->FileName);
+				}
+				else
+				{
+					UE_LOG(LogTemp, Warning, TEXT("EOSGamingService: Failed to delete file %s: %d"),
+					       *LocalCtx->FileName, (int32)Data->ResultCode);
+				}
+
+				LocalCtx->DeleteCallback(bSuccess);
+				delete LocalCtx;
+			}
+		);
+	}
+
+	void SyncFromCloud(TFunction<void(const FGamingServiceResult&)> Callback)
+	{
+		checkf(bIsInitialized && bIsLoggedIn && PlayerDataStorageHandle,
+		       TEXT("EOSGamingService: SyncFromCloud called when service not ready"));
+
+		UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Starting startup sync from cloud..."));
+
+		DownloadManifestFromCloud([this, Callback](bool bSuccess, const FCloudManifest& CloudManifest)
+		{
+			if (!bSuccess)
+			{
+				UE_LOG(LogTemp, Error, TEXT("EOSGamingService: Failed to download cloud manifest"));
+				Callback(FGamingServiceResult(false));
+				return;
+			}
+
+			FCloudManifest LocalManifest;
+			bool bLocalManifestExists = LoadLocalManifest(LocalManifest);
+
+			if (!bLocalManifestExists)
+			{
+				UE_LOG(LogTemp, Log, TEXT("EOSGamingService: No local manifest found, building from files"));
+				LocalManifest = BuildLocalManifest();
+			}
+
+			TArray<FString> FilesToDownload;
+			TArray<FString> FilesToUpload;
+			TArray<FString> FilesToResolve;
+
+			for (const auto& CloudFile : CloudManifest.Files)
+			{
+				const FString& FileName = CloudFile.Key;
+				const FFileManifestEntry& CloudEntry = CloudFile.Value;
+
+				if (!LocalManifest.Files.Contains(FileName))
+				{
+					FilesToDownload.Add(FileName);
+					UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Will download missing file: %s"), *FileName);
+				}
+				else
+				{
+					const FFileManifestEntry& LocalEntry = LocalManifest.Files[FileName];
+
+					if (LocalEntry.Timestamp != CloudEntry.Timestamp || LocalEntry.Size != CloudEntry.Size)
+					{
+						if (LocalEntry.Timestamp > CloudEntry.Timestamp)
+						{
+							FilesToUpload.Add(FileName);
+							UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Local file newer, will upload: %s"),
+							       *FileName);
+						}
+						else if (LocalEntry.Timestamp < CloudEntry.Timestamp)
+						{
+							FilesToDownload.Add(FileName);
+							UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Cloud file newer, will download: %s"),
+							       *FileName);
+						}
+						else
+						{
+							FilesToDownload.Add(FileName);
+							UE_LOG(LogTemp, Warning,
+							       TEXT(
+								       "EOSGamingService: File size changed for %s (same timestamp), downloading from cloud"
+							       ), *FileName);
+						}
+					}
+				}
+			}
+
+			for (const auto& LocalFile : LocalManifest.Files)
+			{
+				if (!CloudManifest.Files.Contains(LocalFile.Key))
+				{
+					FilesToUpload.Add(LocalFile.Key);
+					UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Will upload new local file: %s"), *LocalFile.Key);
+				}
+			}
+
+			ExecuteStartupSync(FilesToDownload, FilesToUpload, 0, 0, Callback);
+		});
+	}
+
+	void ExecuteStartupSync(const TArray<FString>& FilesToDownload, const TArray<FString>& FilesToUpload,
+	                        int32 DownloadIndex, int32 UploadIndex,
+	                        TFunction<void(const FGamingServiceResult&)> Callback)
+	{
+		if (DownloadIndex < FilesToDownload.Num())
+		{
+			const FString& FileName = FilesToDownload[DownloadIndex];
+			DownloadFileFromCloud(
+				FileName, [this, FilesToDownload, FilesToUpload, DownloadIndex, UploadIndex, Callback](bool bSuccess)
+				{
+					if (!bSuccess)
+					{
+						UE_LOG(LogTemp, Error, TEXT("EOSGamingService: Startup sync failed during download"));
+						Callback(FGamingServiceResult(false));
+						return;
+					}
+					ExecuteStartupSync(FilesToDownload, FilesToUpload, DownloadIndex + 1, UploadIndex, Callback);
+				});
+			return;
+		}
+
+		if (UploadIndex < FilesToUpload.Num())
+		{
+			const FString& FileName = FilesToUpload[UploadIndex];
+			UploadFileToCloud(
+				FileName, [this, FilesToDownload, FilesToUpload, DownloadIndex, UploadIndex, Callback](bool bSuccess)
+				{
+					if (!bSuccess)
+					{
+						UE_LOG(LogTemp, Error, TEXT("EOSGamingService: Startup sync failed during upload"));
+						Callback(FGamingServiceResult(false));
+						return;
+					}
+					ExecuteStartupSync(FilesToDownload, FilesToUpload, DownloadIndex, UploadIndex + 1, Callback);
+				});
+			return;
+		}
+
+		FCloudManifest FinalManifest = BuildLocalManifest();
+		SaveLocalManifest(FinalManifest);
+		UploadManifestToCloud(FinalManifest, [Callback](bool bSuccess)
+		{
+			if (bSuccess)
+			{
+				UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Startup sync completed successfully"));
+				Callback(FGamingServiceResult(true));
+			}
+			else
+			{
+				UE_LOG(LogTemp, Error, TEXT("EOSGamingService: Failed to upload final manifest"));
+				Callback(FGamingServiceResult(false));
+			}
+		});
+	}
+
+	void SyncToCloud(TFunction<void(const FGamingServiceResult&)> Callback)
+	{
+		if (!bIsInitialized || !bIsLoggedIn || !ProductUserId || !PlayerDataStorageHandle)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("EOSGamingService: Cannot sync to cloud - not logged in or service not ready"));
+			Callback(FGamingServiceResult(false));
+			return;
+		}
+
+		UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Starting shutdown sync to cloud..."));
+
+		FCloudManifest OldLocalManifest;
+		LoadLocalManifest(OldLocalManifest);
+
+		FCloudManifest CurrentLocalManifest = BuildLocalManifest();
+
+		TArray<FString> FilesToUpload;
+		for (const auto& LocalFile : CurrentLocalManifest.Files)
+		{
+			const FString& FileName = LocalFile.Key;
+			const FFileManifestEntry& CurrentEntry = LocalFile.Value;
+
+			if (!OldLocalManifest.Files.Contains(FileName))
+			{
+				FilesToUpload.Add(FileName);
+				UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Will upload new file: %s"), *FileName);
+			}
+			else
+			{
+				const FFileManifestEntry& OldEntry = OldLocalManifest.Files[FileName];
+				if (OldEntry.Timestamp != CurrentEntry.Timestamp || OldEntry.Size != CurrentEntry.Size)
+				{
+					FilesToUpload.Add(FileName);
+					UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Will upload modified file: %s"), *FileName);
+				}
+			}
+		}
+
+		TArray<FString> FilesToDelete;
+		for (const auto& OldFile : OldLocalManifest.Files)
+		{
+			if (!CurrentLocalManifest.Files.Contains(OldFile.Key))
+			{
+				FilesToDelete.Add(OldFile.Key);
+				UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Will delete removed file: %s"), *OldFile.Key);
+			}
+		}
+
+		ExecuteShutdownSync(FilesToUpload, FilesToDelete, CurrentLocalManifest, 0, 0, Callback);
+	}
+
+	void ExecuteShutdownSync(const TArray<FString>& FilesToUpload, const TArray<FString>& FilesToDelete,
+	                         const FCloudManifest& FinalManifest, int32 UploadIndex, int32 DeleteIndex,
+	                         TFunction<void(const FGamingServiceResult&)> Callback)
+	{
+		if (UploadIndex < FilesToUpload.Num())
+		{
+			const FString& FileName = FilesToUpload[UploadIndex];
+			UploadFileToCloud(
+				FileName,
+				[this, FilesToUpload, FilesToDelete, FinalManifest, UploadIndex, DeleteIndex, Callback](bool bSuccess)
+				{
+					if (!bSuccess)
+					{
+						UE_LOG(LogTemp, Error, TEXT("EOSGamingService: Shutdown sync failed during upload"));
+						Callback(FGamingServiceResult(false));
+						return;
+					}
+					ExecuteShutdownSync(FilesToUpload, FilesToDelete, FinalManifest, UploadIndex + 1, DeleteIndex,
+					                    Callback);
+				});
+			return;
+		}
+
+		if (DeleteIndex < FilesToDelete.Num())
+		{
+			const FString& FileName = FilesToDelete[DeleteIndex];
+			DeleteFileFromCloud(
+				FileName,
+				[this, FilesToUpload, FilesToDelete, FinalManifest, UploadIndex, DeleteIndex, Callback](bool bSuccess)
+				{
+					if (!bSuccess)
+					{
+						UE_LOG(LogTemp, Warning,
+						       TEXT("EOSGamingService: Failed to delete file during shutdown sync, continuing"));
+					}
+					ExecuteShutdownSync(FilesToUpload, FilesToDelete, FinalManifest, UploadIndex, DeleteIndex + 1,
+					                    Callback);
+				});
+			return;
+		}
+
+		SaveLocalManifest(FinalManifest);
+		UploadManifestToCloud(FinalManifest, [Callback](bool bSuccess)
+		{
+			if (bSuccess)
+			{
+				UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Shutdown sync completed successfully"));
+				Callback(FGamingServiceResult(true));
+			}
+			else
+			{
+				UE_LOG(LogTemp, Error, TEXT("EOSGamingService: Failed to upload final manifest"));
+				Callback(FGamingServiceResult(false));
+			}
 		});
 	}
 };
@@ -1025,6 +1938,30 @@ void FEOSGamingService::QueryStat(const FString& StatName,
 	Impl->QueryStat(StatName, MoveTemp(Callback));
 }
 
+void FEOSGamingService::WriteFile(const FString& FilePath, const TArray<uint8>& Data,
+                                  TFunction<void(const FGamingServiceResult&)> Callback)
+{
+	Impl->WriteFile(FilePath, Data, MoveTemp(Callback));
+}
+
+void FEOSGamingService::ReadFile(const FString& FilePath,
+                                 TFunction<void(const FFileReadResult&)> Callback)
+{
+	Impl->ReadFile(FilePath, MoveTemp(Callback));
+}
+
+void FEOSGamingService::DeleteFile(const FString& FilePath,
+                                   TFunction<void(const FGamingServiceResult&)> Callback)
+{
+	Impl->DeleteFile(FilePath, MoveTemp(Callback));
+}
+
+void FEOSGamingService::ListFiles(const FString& DirectoryPath,
+                                  TFunction<void(const FFilesListResult&)> Callback)
+{
+	Impl->ListFiles(DirectoryPath, MoveTemp(Callback));
+}
+
 void FEOSGamingService::Login(const FGamingServiceLoginParams& Params,
                               TFunction<void(const FGamingServiceResult&)> Callback)
 {
@@ -1059,6 +1996,16 @@ FString FEOSGamingService::GetUserId() const
 FString FEOSGamingService::GetDisplayName() const
 {
 	return Impl->GetDisplayName();
+}
+
+void FEOSGamingService::SetTempStoragePath(const FString& InPath)
+{
+	Impl->SetTempStoragePath(InPath);
+}
+
+const FString& FEOSGamingService::GetTempStoragePath() const
+{
+	return Impl->GetTempStoragePath();
 }
 
 

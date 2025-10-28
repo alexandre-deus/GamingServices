@@ -32,9 +32,10 @@ public class GamingServices : ModuleRules
         if (Target.Platform == UnrealTargetPlatform.Win64)
         {
             var lib = Path.Combine(EOSLibDir, "EOSSDK-Win64-Shipping.lib");
-            var dll = $"{EOSBinDir}/EOSSDK-Win64-Shipping.dll";
+            var dll = Path.Combine(EOSBinDir, "EOSSDK-Win64-Shipping.dll");
             PublicAdditionalLibraries.Add(lib);
-            RuntimeDependencies.Add(dll);
+            RuntimeDependencies.Add("$(TargetOutputDir)/EOSSDK-Win64-Shipping.dll", dll);
+            PublicDelayLoadDLLs.Add("EOSSDK-Win64-Shipping.dll");
         }
         else if (Target.Platform == UnrealTargetPlatform.Linux)
         {
@@ -74,6 +75,7 @@ public class GamingServices : ModuleRules
             string PlatformFolder  = Path.Combine(SteamRoot, "win64");
             RuntimeDependencies.Add($"{PlatformFolder}/steam_api64.dll");
             PublicAdditionalLibraries.Add(Path.Combine(SteamBinRoot, "win64", "steam_api64.lib"));
+            PublicDelayLoadDLLs.Add("steam_api64.dll");
         }
         else if (Target.Platform == UnrealTargetPlatform.Linux)
         {
@@ -107,10 +109,12 @@ public class GamingServices : ModuleRules
             "Slate",
             "SlateCore",
             "Projects",
+            "Json",
+            "JsonUtilities",
         });
 
         // Switch backend here
-        const EServiceBackends backend = EServiceBackends.EpicOnlineServices;
+        const EServiceBackends backend = EServiceBackends.Steamworks;
 
         bool bServiceConfigured = false;
         switch (backend)

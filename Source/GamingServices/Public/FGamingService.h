@@ -38,13 +38,13 @@ public:
 	virtual void ListFiles(const FString& DirectoryPath,
 	                       TFunction<void(const FFilesListResult&)> Callback) = 0;
 
-	virtual void SetRemoteSetting(const FString& Key, const FString& Value,
-	                              TFunction<void(const FGamingServiceResult&)> Callback);
-	virtual void GetRemoteSetting(const FString& Key,
-	                              TFunction<void(const FString& Value)> Callback);
-	virtual void DeleteRemoteSetting(const FString& Key,
-	                                 TFunction<void(const FGamingServiceResult&)> Callback);
-	virtual void ListRemoteSettings(TFunction<void(const TArray<FString>& Keys)> Callback);
+	void SetRemoteSetting(const FString& Key, const FString& Value,
+	                              TFunction<void(const FRemoteSettingResult&)> Callback);
+	void GetRemoteSetting(const FString& Key,
+	                              TFunction<void(const FRemoteSettingResult&)> Callback);
+	void DeleteRemoteSetting(const FString& Key,
+	                                 TFunction<void(const FRemoteSettingResult&)> Callback);
+	void ListRemoteSettings(TFunction<void(const FRemoteSettingsListResult&)> Callback);
 
 	virtual void Tick() = 0;
 
@@ -58,7 +58,7 @@ public:
 
 protected:
 	static constexpr const TCHAR* SettingsFileName = TEXT("game_settings.json");
-
-	void LoadSettings(TFunction<void(const TMap<FString, FString>&)> Callback);
-	void SaveSettings(const TMap<FString, FString>& Settings, TFunction<void(const FGamingServiceResult&)> Callback);
+	
+	static bool ParseSettingsFromBuffer(const TArray<uint8>& Buffer, TMap<FString, FString>& OutSettings);
+	static bool SerializeSettingsToBuffer(const TMap<FString, FString>& Settings, TArray<uint8>& OutBuffer);
 };

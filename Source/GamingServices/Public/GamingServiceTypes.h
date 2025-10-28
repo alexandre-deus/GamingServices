@@ -165,6 +165,9 @@ struct GAMINGSERVICES_API FEOSInitOptions
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	FString ClientSecret;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FString EncryptionKey;
 };
 
 USTRUCT(BlueprintType)
@@ -178,11 +181,9 @@ struct GAMINGSERVICES_API FGamingServiceConnectParams
 {
 	GENERATED_BODY()
 
-	// EOS-specific options
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	FEOSInitOptions EOS;
 
-	// Steamworks-specific options
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	FSteamworksInitOptions Steamworks;
 };
@@ -204,11 +205,9 @@ struct GAMINGSERVICES_API FEOSLoginOptions
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	EEOSLoginMethod Method = EEOSLoginMethod::PersistentAuth;
 
-	// Used only when Method == Developer
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	FString DeveloperHost;
 
-	// Used only when Method == Developer
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	FString DeveloperCredentialName;
 };
@@ -229,4 +228,117 @@ struct GAMINGSERVICES_API FGamingServiceLoginParams
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	FSteamworksLoginOptions Steamworks;
+};
+
+USTRUCT(BlueprintType)
+struct GAMINGSERVICES_API FFileBlobData
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly)
+	FString FilePath;
+
+	UPROPERTY(BlueprintReadOnly)
+	int64 Size;
+
+	UPROPERTY(BlueprintReadOnly)
+	FDateTime LastModified;
+};
+
+USTRUCT(BlueprintType)
+struct GAMINGSERVICES_API FFilesListResult : public FGamingServiceResult
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly)
+	TArray<FFileBlobData> Files;
+};
+
+USTRUCT(BlueprintType)
+struct GAMINGSERVICES_API FFileReadResult : public FGamingServiceResult
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly)
+	FString FilePath;
+
+	TArray<uint8> Data;
+
+	FFileReadResult() = default;
+
+	FFileReadResult(bool InSuccess, const FString& InFilePath = TEXT(""), const TArray<uint8>& InData = TArray<uint8>())
+		: FGamingServiceResult(InSuccess), FilePath(InFilePath), Data(InData)
+	{
+	}
+
+	static FFileReadResult Success(const FString& InFilePath, const TArray<uint8>& InData)
+	{
+		return FFileReadResult(true, InFilePath, InData);
+	}
+
+	static FFileReadResult Failure(const FString& InFilePath)
+	{
+		return FFileReadResult(false, InFilePath);
+	}
+};
+
+USTRUCT(BlueprintType)
+struct GAMINGSERVICES_API FRemoteSettingResult : public FGamingServiceResult
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly)
+	FString Key;
+
+	UPROPERTY(BlueprintReadOnly)
+	FString Value;
+
+	UPROPERTY(BlueprintReadOnly)
+	FString ErrorMessage;
+
+	FRemoteSettingResult() = default;
+
+	FRemoteSettingResult(bool InSuccess, const FString& InKey = TEXT(""), const FString& InValue = TEXT(""), const FString& InErrorMessage = TEXT(""))
+		: FGamingServiceResult(InSuccess), Key(InKey), Value(InValue), ErrorMessage(InErrorMessage)
+	{
+	}
+
+	static FRemoteSettingResult Success(const FString& InKey, const FString& InValue)
+	{
+		return FRemoteSettingResult(true, InKey, InValue);
+	}
+
+	static FRemoteSettingResult Failure(const FString& InKey, const FString& InErrorMessage)
+	{
+		return FRemoteSettingResult(false, InKey, TEXT(""), InErrorMessage);
+	}
+};
+
+USTRUCT(BlueprintType)
+struct GAMINGSERVICES_API FRemoteSettingsListResult : public FGamingServiceResult
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly)
+	TArray<FString> Keys;
+
+	UPROPERTY(BlueprintReadOnly)
+	FString ErrorMessage;
+
+	FRemoteSettingsListResult() = default;
+
+	FRemoteSettingsListResult(bool InSuccess, const TArray<FString>& InKeys = TArray<FString>(), const FString& InErrorMessage = TEXT(""))
+		: FGamingServiceResult(InSuccess), Keys(InKeys), ErrorMessage(InErrorMessage)
+	{
+	}
+
+	static FRemoteSettingsListResult Success(const TArray<FString>& InKeys)
+	{
+		return FRemoteSettingsListResult(true, InKeys);
+	}
+
+	static FRemoteSettingsListResult Failure(const FString& InErrorMessage)
+	{
+		return FRemoteSettingsListResult(false, TArray<FString>(), InErrorMessage);
+	}
 };
