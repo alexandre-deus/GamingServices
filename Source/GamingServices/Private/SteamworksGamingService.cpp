@@ -398,7 +398,7 @@ public:
 				   *FilePath);
 			if (Callback)
 			{
-				Callback(FFileReadResult::Failure(FilePath));
+				Callback(FFileReadResult(false, FilePath));
 			}
 			return;
 		}
@@ -409,7 +409,7 @@ public:
 			UE_LOG(LogTemp, Warning, TEXT("SteamworksGamingService: Invalid file size for: %s"), *FilePath);
 			if (Callback)
 			{
-				Callback(FFileReadResult::Failure(FilePath));
+				Callback(FFileReadResult(false, FilePath));
 			}
 			return;
 		}
@@ -423,7 +423,7 @@ public:
 			UE_LOG(LogTemp, Error, TEXT("SteamworksGamingService: Failed to read file from cloud: %s"), *FilePath);
 			if (Callback)
 			{
-				Callback(FFileReadResult::Failure(FilePath));
+				Callback(FFileReadResult(false, FilePath));
 			}
 			return;
 		}
@@ -434,7 +434,7 @@ public:
 			   *FilePath, FileSize);
 		if (Callback)
 		{
-			Callback(FFileReadResult::Success(FilePath, FileData));
+			Callback(FFileReadResult(true, FilePath, FileData));
 		}
 	}
 
@@ -668,7 +668,7 @@ private:
 			   (uint64)Leaderboard, ContinuationToken, Limit);
 
 		SteamAPICall_t DownloadHandle = SteamUserStats->DownloadLeaderboardEntries(
-			Leaderboard, k_ELeaderboardDataRequestGlobal, ContinuationToken, Limit);
+			Leaderboard, k_ELeaderboardDataRequestGlobal, ContinuationToken, ContinuationToken + Limit);
 
 		UE_LOG(LogTemp, Log,
 			   TEXT("SteamworksGamingService: DownloadLeaderboardEntries issued, "
@@ -726,7 +726,14 @@ private:
 				}
 				
 				FLeaderboardResult Result(true, LeaderboardId, Entries, Dl.m_cEntryCount);
-				Result.ContinuationToken = ContinuationToken + Entries.Num();
+				if (Entries.Num() > 0)
+				{
+					Result.ContinuationToken = ContinuationToken + Entries.Num() + 1;
+				}
+				else
+				{
+					Result.ContinuationToken = -1;
+				}
 
 				UE_LOG(LogTemp, Log,
 					   TEXT("SteamworksGamingService: Completed - Total=%d, "

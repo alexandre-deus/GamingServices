@@ -68,7 +68,8 @@ void FGamingService::SetRemoteSetting(const FString& Key, const FString& Value,
 		TArray<uint8> JsonData;
 		if (!SerializeSettingsToBuffer(Settings, JsonData))
 		{
-			Callback(FRemoteSettingResult::Failure(Key, TEXT("Failed to serialize settings")));
+			UE_LOG(LogTemp, Error, TEXT("FGamingService: Failed to serialize settings for key: %s"), *Key);
+			Callback(FRemoteSettingResult(false, Key, TEXT("")));
 			return;
 		}
 		
@@ -76,11 +77,12 @@ void FGamingService::SetRemoteSetting(const FString& Key, const FString& Value,
 		{
 			if (WriteResult.bSuccess)
 			{
-				Callback(FRemoteSettingResult::Success(Key, Value));
+				Callback(FRemoteSettingResult(true, Key, Value));
 			}
 			else
 			{
-				Callback(FRemoteSettingResult::Failure(Key, TEXT("Failed to write settings")));
+				UE_LOG(LogTemp, Error, TEXT("FGamingService: Failed to write settings for key: %s"), *Key);
+				Callback(FRemoteSettingResult(false, Key, TEXT("")));
 			}
 		});
 	});
@@ -95,24 +97,27 @@ void FGamingService::GetRemoteSetting(const FString& Key,
 	{
 		if (!ReadResult.bSuccess)
 		{
-			Callback(FRemoteSettingResult::Failure(Key, TEXT("Failed to read settings")));
+			UE_LOG(LogTemp, Error, TEXT("FGamingService: Failed to read settings for key: %s"), *Key);
+			Callback(FRemoteSettingResult(false, Key, TEXT("")));
 			return;
 		}
 		
 		TMap<FString, FString> Settings;
 		if (!ParseSettingsFromBuffer(ReadResult.Data, Settings))
 		{
-			Callback(FRemoteSettingResult::Failure(Key, TEXT("Failed to parse settings")));
+			UE_LOG(LogTemp, Error, TEXT("FGamingService: Failed to parse settings for key: %s"), *Key);
+			Callback(FRemoteSettingResult(false, Key, TEXT("")));
 			return;
 		}
 		
 		if (const FString* Value = Settings.Find(Key))
 		{
-			Callback(FRemoteSettingResult::Success(Key, *Value));
+			Callback(FRemoteSettingResult(true, Key, *Value));
 		}
 		else
 		{
-			Callback(FRemoteSettingResult::Failure(Key, TEXT("Setting not found")));
+			UE_LOG(LogTemp, Error, TEXT("FGamingService: Setting not found for key: %s"), *Key);
+			Callback(FRemoteSettingResult(false, Key, TEXT("")));
 		}
 	});
 }
@@ -133,7 +138,8 @@ void FGamingService::DeleteRemoteSetting(const FString& Key,
 		
 		if (!Settings.Contains(Key))
 		{
-			Callback(FRemoteSettingResult::Failure(Key, TEXT("Setting not found")));
+			UE_LOG(LogTemp, Error, TEXT("FGamingService: Setting not found for key: %s"), *Key);
+			Callback(FRemoteSettingResult(false, Key, TEXT("")));
 			return;
 		}
 		
@@ -145,11 +151,12 @@ void FGamingService::DeleteRemoteSetting(const FString& Key,
 			{
 				if (DeleteResult.bSuccess)
 				{
-					Callback(FRemoteSettingResult::Success(Key, TEXT("")));
+					Callback(FRemoteSettingResult(true, Key, TEXT("")));
 				}
 				else
 				{
-					Callback(FRemoteSettingResult::Failure(Key, TEXT("Failed to delete settings file")));
+					UE_LOG(LogTemp, Error, TEXT("FGamingService: Failed to delete settings file for key: %s"), *Key);
+					Callback(FRemoteSettingResult(false, Key, TEXT("")));
 				}
 			});
 		}
@@ -158,7 +165,8 @@ void FGamingService::DeleteRemoteSetting(const FString& Key,
 			TArray<uint8> JsonData;
 			if (!SerializeSettingsToBuffer(Settings, JsonData))
 			{
-				Callback(FRemoteSettingResult::Failure(Key, TEXT("Failed to serialize settings")));
+				UE_LOG(LogTemp, Error, TEXT("FGamingService: Failed to serialize settings for key: %s"), *Key);
+				Callback(FRemoteSettingResult(false, Key, TEXT("")));
 				return;
 			}
 			
@@ -166,11 +174,12 @@ void FGamingService::DeleteRemoteSetting(const FString& Key,
 			{
 				if (WriteResult.bSuccess)
 				{
-					Callback(FRemoteSettingResult::Success(Key, TEXT("")));
+					Callback(FRemoteSettingResult(true, Key, TEXT("")));
 				}
 				else
 				{
-					Callback(FRemoteSettingResult::Failure(Key, TEXT("Failed to write settings")));
+					UE_LOG(LogTemp, Error, TEXT("FGamingService: Failed to write settings for key: %s"), *Key);
+					Callback(FRemoteSettingResult(false, Key, TEXT("")));
 				}
 			});
 		}
@@ -185,20 +194,20 @@ void FGamingService::ListRemoteSettings(TFunction<void(const FRemoteSettingsList
 	{
 		if (!ReadResult.bSuccess || ReadResult.Data.Num() == 0)
 		{
-			Callback(FRemoteSettingsListResult::Success(TArray<FString>()));
+			Callback(FRemoteSettingsListResult(true, TArray<FString>()));
 			return;
 		}
 		
 		TMap<FString, FString> Settings;
 		if (!ParseSettingsFromBuffer(ReadResult.Data, Settings))
 		{
-			Callback(FRemoteSettingsListResult::Success(TArray<FString>()));
+			Callback(FRemoteSettingsListResult(true, TArray<FString>()));
 			return;
 		}
 		
 		TArray<FString> Keys;
 		Settings.GetKeys(Keys);
 		
-		Callback(FRemoteSettingsListResult::Success(Keys));
+		Callback(FRemoteSettingsListResult(true, Keys));
 	});
 }

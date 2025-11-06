@@ -16,7 +16,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGamingLeaderboardScoreWritten, co
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGamingLeaderboardQueried, const FLeaderboardResult&, Result);
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGamingStatProgressed, const FGamingServiceResult&, Result);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGamingStatIngested, const FGamingServiceResult&, Result);
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGamingStatQueried, const FStatQueryResult&, Result);
 
@@ -120,7 +120,7 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "GamingServices|Events")
 	FOnGamingLeaderboardQueried OnLeaderboardQueried;
 	UPROPERTY(BlueprintAssignable, Category = "GamingServices|Events")
-	FOnGamingStatProgressed OnStatProgressed;
+	FOnGamingStatIngested OnStatIngested;
 	UPROPERTY(BlueprintAssignable, Category = "GamingServices|Events")
 	FOnGamingStatQueried OnStatQueried;
 	UPROPERTY(BlueprintAssignable, Category = "GamingServices|Events")

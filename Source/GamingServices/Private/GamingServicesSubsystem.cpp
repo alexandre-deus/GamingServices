@@ -79,7 +79,7 @@ void UGamingServicesSubsystem::IngestStat(const FString& StatName, int32 Amount)
 {
 	Service->IngestStat(StatName, Amount, [this](const FGamingServiceResult& R)
 	{
-		OnStatProgressed.Broadcast(R);
+		OnStatIngested.Broadcast(R);
 	});
 }
 

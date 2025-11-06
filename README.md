@@ -132,7 +132,7 @@ Example (Blueprint):
 ### 5.5) Stats
 - `IngestStat(StatName, Amount)`
 - `QueryStat(StatName)`
-- Bind to `OnStatProgressed` and `OnStatQueried`.
+- Bind to `OnStatIngested` and `OnStatQueried`.
 
 ### 5.6) Auth Helpers
 - `IsConnected()`, `IsLoggedIn()`, `NeedsLogin()`

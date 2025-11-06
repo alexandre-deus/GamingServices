@@ -140,7 +140,7 @@ public class GamingServices : ModuleRules
         // Fallback to null service if no SDK is available
         if (!bServiceConfigured)
         {
-            System.Console.WriteLine($"Warning: {backend} SDK not available. Falling back to null service.");
+            Console.WriteLine($"Warning: {backend} SDK not available. Falling back to null service.");
         }
     }
 }

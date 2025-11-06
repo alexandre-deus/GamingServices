@@ -519,12 +519,12 @@ public:
 		if (!FFileHelper::LoadFileToArray(FileData, *FullPath))
 		{
 			UE_LOG(LogTemp, Error, TEXT("EOSGamingService: Failed to read from cloud storage: %s"), *FullPath);
-			Callback(FFileReadResult::Failure(FilePath));
+			Callback(FFileReadResult(false, FilePath));
 			return;
 		}
 
 		UE_LOG(LogTemp, Log, TEXT("EOSGamingService: File read from cloud storage successfully (%d bytes)"), FileData.Num());
-		Callback(FFileReadResult::Success(FilePath, FileData));
+		Callback(FFileReadResult(true, FilePath, FileData));
 	}
 
 	void DeleteFile(const FString& FilePath,
@@ -555,7 +555,9 @@ public:
 
 		UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Listing files in local storage directory: %s"), *DirectoryPath);
 
-		FString FullDirectoryPath = TempStoragePath.IsEmpty() ? DirectoryPath : (TempStoragePath / DirectoryPath);
+		FString FullDirectoryPath = TempStoragePath.IsEmpty() 
+			? (FPaths::ProjectSavedDir() / CloudStorageDirectoryName / DirectoryPath)
+			: (TempStoragePath / DirectoryPath);
 
 		FFilesListResult Result;
 		Result.bSuccess = true;
@@ -1283,13 +1285,17 @@ public:
 			                   ? (FPaths::ProjectSavedDir() / CloudStorageDirectoryName)
 			                   : TempStoragePath;
 
+		UE_LOG(LogTemp, VeryVerbose, TEXT("EOSGamingService: Building local manifest from: %s"), *BasePath);
+
 		if (!FPaths::DirectoryExists(BasePath))
 		{
+			UE_LOG(LogTemp, Warning, TEXT("EOSGamingService: Base directory does not exist: %s"), *BasePath);
 			return Manifest;
 		}
 
 		TArray<FString> LocalFiles;
 		IFileManager::Get().FindFilesRecursive(LocalFiles, *BasePath, TEXT("*"), true, false);
+		UE_LOG(LogTemp, VeryVerbose, TEXT("EOSGamingService: Found %d files in directory"), LocalFiles.Num());
 
 		FString BasePathWithSlash = BasePath;
 		if (!BasePathWithSlash.EndsWith(TEXT("/")) && !BasePathWithSlash.EndsWith(TEXT("\\")))
@@ -1512,11 +1518,16 @@ public:
 					UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Downloaded manifest from cloud with %d files"),
 					       Manifest.Files.Num());
 				}
+				else
+				{
+					UE_LOG(LogTemp, Warning, TEXT("EOSGamingService: Failed to parse manifest JSON"));
+				}
 			}
-			else if (bSuccess && FileData.Num() == 0)
+			else
 			{
 				UE_LOG(LogTemp, Log, TEXT("EOSGamingService: No manifest found in cloud (first sync)"));
 				bSuccess = true;
+				Manifest = FCloudManifest();
 			}
 
 			Callback(bSuccess, Manifest);
@@ -1643,7 +1654,7 @@ public:
 		checkf(bIsInitialized && bIsLoggedIn && PlayerDataStorageHandle,
 		       TEXT("EOSGamingService: SyncFromCloud called when service not ready"));
 
-		UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Starting startup sync from cloud..."));
+		UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Starting sync from cloud..."));
 
 		DownloadManifestFromCloud([this, Callback](bool bSuccess, const FCloudManifest& CloudManifest)
 		{
@@ -1654,125 +1665,116 @@ public:
 				return;
 			}
 
-			FCloudManifest LocalManifest;
-			bool bLocalManifestExists = LoadLocalManifest(LocalManifest);
+			UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Cloud manifest contains %d files"), CloudManifest.Files.Num());
 
-			if (!bLocalManifestExists)
-			{
-				UE_LOG(LogTemp, Log, TEXT("EOSGamingService: No local manifest found, building from files"));
-				LocalManifest = BuildLocalManifest();
-			}
+			FCloudManifest LocalManifest = BuildLocalManifest();
+			UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Local manifest contains %d files"), LocalManifest.Files.Num());
 
 			TArray<FString> FilesToDownload;
-			TArray<FString> FilesToUpload;
-			TArray<FString> FilesToResolve;
-
-			for (const auto& CloudFile : CloudManifest.Files)
+			TArray<FString> FilesToDelete;
+			for (const auto& CloudFilePair : CloudManifest.Files)
 			{
-				const FString& FileName = CloudFile.Key;
-				const FFileManifestEntry& CloudEntry = CloudFile.Value;
+				const FString& FileName = CloudFilePair.Key;
+				const FFileManifestEntry& CloudEntry = CloudFilePair.Value;
 
+				if (FileName == ManifestFileName)
+				{
+					continue;
+				}
+				
 				if (!LocalManifest.Files.Contains(FileName))
 				{
 					FilesToDownload.Add(FileName);
-					UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Will download missing file: %s"), *FileName);
+					UE_LOG(LogTemp, Log, TEXT("EOSGamingService: File missing locally, will download: %s"), *FileName);
 				}
 				else
 				{
 					const FFileManifestEntry& LocalEntry = LocalManifest.Files[FileName];
 
-					if (LocalEntry.Timestamp != CloudEntry.Timestamp || LocalEntry.Size != CloudEntry.Size)
+					if (CloudEntry.Timestamp > LocalEntry.Timestamp)
 					{
-						if (LocalEntry.Timestamp > CloudEntry.Timestamp)
-						{
-							FilesToUpload.Add(FileName);
-							UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Local file newer, will upload: %s"),
-							       *FileName);
-						}
-						else if (LocalEntry.Timestamp < CloudEntry.Timestamp)
-						{
-							FilesToDownload.Add(FileName);
-							UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Cloud file newer, will download: %s"),
-							       *FileName);
-						}
-						else
-						{
-							FilesToDownload.Add(FileName);
-							UE_LOG(LogTemp, Warning,
-							       TEXT(
-								       "EOSGamingService: File size changed for %s (same timestamp), downloading from cloud"
-							       ), *FileName);
-						}
+						FilesToDownload.Add(FileName);
+						UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Cloud file is newer, will download: %s (cloud: %lld, local: %lld)"),
+						       *FileName, CloudEntry.Timestamp, LocalEntry.Timestamp);
 					}
 				}
 			}
-
-			for (const auto& LocalFile : LocalManifest.Files)
+			
+			for (const auto& LocalFilePair : LocalManifest.Files)
 			{
-				if (!CloudManifest.Files.Contains(LocalFile.Key))
+				const FString& FileName = LocalFilePair.Key;
+				
+				if (FileName == ManifestFileName)
 				{
-					FilesToUpload.Add(LocalFile.Key);
-					UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Will upload new local file: %s"), *LocalFile.Key);
+					continue;
+				}
+				
+				if (!CloudManifest.Files.Contains(FileName))
+				{
+					FilesToDelete.Add(FileName);
+					UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Local file not in cloud, will delete: %s"), *FileName);
 				}
 			}
 
-			ExecuteStartupSync(FilesToDownload, FilesToUpload, 0, 0, Callback);
+			UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Sync plan - %d files to download, %d files to delete"),
+			       FilesToDownload.Num(), FilesToDelete.Num());
+
+			ProcessSyncOperations(FilesToDownload, FilesToDelete, 0, 0, Callback);
 		});
 	}
 
-	void ExecuteStartupSync(const TArray<FString>& FilesToDownload, const TArray<FString>& FilesToUpload,
-	                        int32 DownloadIndex, int32 UploadIndex,
-	                        TFunction<void(const FGamingServiceResult&)> Callback)
+	void ProcessSyncOperations(const TArray<FString>& FilesToDownload, const TArray<FString>& FilesToDelete,
+	                           int32 DownloadIndex, int32 DeleteIndex,
+	                           TFunction<void(const FGamingServiceResult&)> Callback)
 	{
 		if (DownloadIndex < FilesToDownload.Num())
 		{
 			const FString& FileName = FilesToDownload[DownloadIndex];
-			DownloadFileFromCloud(
-				FileName, [this, FilesToDownload, FilesToUpload, DownloadIndex, UploadIndex, Callback](bool bSuccess)
+			DownloadFileFromCloud(FileName, [this, FilesToDownload, FilesToDelete, DownloadIndex, DeleteIndex, FileName, Callback](bool bSuccess)
+			{
+				if (!bSuccess)
 				{
-					if (!bSuccess)
-					{
-						UE_LOG(LogTemp, Error, TEXT("EOSGamingService: Startup sync failed during download"));
-						Callback(FGamingServiceResult(false));
-						return;
-					}
-					ExecuteStartupSync(FilesToDownload, FilesToUpload, DownloadIndex + 1, UploadIndex, Callback);
-				});
+					UE_LOG(LogTemp, Error, TEXT("EOSGamingService: Failed to download file during sync: %s"), *FileName);
+					Callback(FGamingServiceResult(false));
+					return;
+				}
+				UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Downloaded file: %s"), *FileName);
+				ProcessSyncOperations(FilesToDownload, FilesToDelete, DownloadIndex + 1, DeleteIndex, Callback);
+			});
 			return;
 		}
-
-		if (UploadIndex < FilesToUpload.Num())
+		
+		if (DeleteIndex < FilesToDelete.Num())
 		{
-			const FString& FileName = FilesToUpload[UploadIndex];
-			UploadFileToCloud(
-				FileName, [this, FilesToDownload, FilesToUpload, DownloadIndex, UploadIndex, Callback](bool bSuccess)
+			const FString& FileName = FilesToDelete[DeleteIndex];
+			DeleteFile(FileName, [this, FilesToDownload, FilesToDelete, DownloadIndex, DeleteIndex, FileName, Callback](const FGamingServiceResult& Result)
+			{
+				if (!Result.bSuccess)
 				{
-					if (!bSuccess)
-					{
-						UE_LOG(LogTemp, Error, TEXT("EOSGamingService: Startup sync failed during upload"));
-						Callback(FGamingServiceResult(false));
-						return;
-					}
-					ExecuteStartupSync(FilesToDownload, FilesToUpload, DownloadIndex, UploadIndex + 1, Callback);
-				});
+					UE_LOG(LogTemp, Warning, TEXT("EOSGamingService: Failed to delete file during sync: %s"), *FileName);
+				}
+				else
+				{
+					UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Deleted file: %s"), *FileName);
+				}
+				ProcessSyncOperations(FilesToDownload, FilesToDelete, DownloadIndex, DeleteIndex + 1, Callback);
+			});
 			return;
 		}
-
-		FCloudManifest FinalManifest = BuildLocalManifest();
-		SaveLocalManifest(FinalManifest);
-		UploadManifestToCloud(FinalManifest, [Callback](bool bSuccess)
+		
+		UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Regenerating local manifest..."));
+		FCloudManifest UpdatedManifest = BuildLocalManifest();
+		
+		if (SaveLocalManifest(UpdatedManifest))
 		{
-			if (bSuccess)
-			{
-				UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Startup sync completed successfully"));
-				Callback(FGamingServiceResult(true));
-			}
-			else
-			{
-				UE_LOG(LogTemp, Error, TEXT("EOSGamingService: Failed to upload final manifest"));
-				Callback(FGamingServiceResult(false));
-			}
-		});
+			UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Local manifest regenerated with %d files"), UpdatedManifest.Files.Num());
+			Callback(FGamingServiceResult(true));
+		}
+		else
+		{
+			UE_LOG(LogTemp, Error, TEXT("EOSGamingService: Failed to save regenerated local manifest"));
+			Callback(FGamingServiceResult(false));
+		}
 	}
 
 	void SyncToCloud(TFunction<void(const FGamingServiceResult&)> Callback)
@@ -1823,11 +1825,11 @@ public:
 			}
 		}
 
-		ExecuteShutdownSync(FilesToUpload, FilesToDelete, CurrentLocalManifest, 0, 0, Callback);
+		ExecuteShutdownSync(FilesToUpload, FilesToDelete, 0, 0, Callback);
 	}
 
 	void ExecuteShutdownSync(const TArray<FString>& FilesToUpload, const TArray<FString>& FilesToDelete,
-	                         const FCloudManifest& FinalManifest, int32 UploadIndex, int32 DeleteIndex,
+	                         int32 UploadIndex, int32 DeleteIndex,
 	                         TFunction<void(const FGamingServiceResult&)> Callback)
 	{
 		if (UploadIndex < FilesToUpload.Num())
@@ -1835,7 +1837,7 @@ public:
 			const FString& FileName = FilesToUpload[UploadIndex];
 			UploadFileToCloud(
 				FileName,
-				[this, FilesToUpload, FilesToDelete, FinalManifest, UploadIndex, DeleteIndex, Callback](bool bSuccess)
+				[this, FilesToUpload, FilesToDelete, UploadIndex, DeleteIndex, Callback](bool bSuccess)
 				{
 					if (!bSuccess)
 					{
@@ -1843,7 +1845,7 @@ public:
 						Callback(FGamingServiceResult(false));
 						return;
 					}
-					ExecuteShutdownSync(FilesToUpload, FilesToDelete, FinalManifest, UploadIndex + 1, DeleteIndex,
+					ExecuteShutdownSync(FilesToUpload, FilesToDelete, UploadIndex + 1, DeleteIndex,
 					                    Callback);
 				});
 			return;
@@ -1854,19 +1856,21 @@ public:
 			const FString& FileName = FilesToDelete[DeleteIndex];
 			DeleteFileFromCloud(
 				FileName,
-				[this, FilesToUpload, FilesToDelete, FinalManifest, UploadIndex, DeleteIndex, Callback](bool bSuccess)
+				[this, FilesToUpload, FilesToDelete, UploadIndex, DeleteIndex, Callback](bool bSuccess)
 				{
 					if (!bSuccess)
 					{
 						UE_LOG(LogTemp, Warning,
 						       TEXT("EOSGamingService: Failed to delete file during shutdown sync, continuing"));
 					}
-					ExecuteShutdownSync(FilesToUpload, FilesToDelete, FinalManifest, UploadIndex, DeleteIndex + 1,
+					ExecuteShutdownSync(FilesToUpload, FilesToDelete, UploadIndex, DeleteIndex + 1,
 					                    Callback);
 				});
 			return;
 		}
-
+		
+		FCloudManifest FinalManifest = BuildLocalManifest();
+		UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Shutdown sync - saving manifest with %d files"), FinalManifest.Files.Num());
 		SaveLocalManifest(FinalManifest);
 		UploadManifestToCloud(FinalManifest, [Callback](bool bSuccess)
 		{

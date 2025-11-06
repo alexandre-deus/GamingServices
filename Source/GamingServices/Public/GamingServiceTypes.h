@@ -270,16 +270,6 @@ struct GAMINGSERVICES_API FFileReadResult : public FGamingServiceResult
 		: FGamingServiceResult(InSuccess), FilePath(InFilePath), Data(InData)
 	{
 	}
-
-	static FFileReadResult Success(const FString& InFilePath, const TArray<uint8>& InData)
-	{
-		return FFileReadResult(true, InFilePath, InData);
-	}
-
-	static FFileReadResult Failure(const FString& InFilePath)
-	{
-		return FFileReadResult(false, InFilePath);
-	}
 };
 
 USTRUCT(BlueprintType)
@@ -293,24 +283,11 @@ struct GAMINGSERVICES_API FRemoteSettingResult : public FGamingServiceResult
 	UPROPERTY(BlueprintReadOnly)
 	FString Value;
 
-	UPROPERTY(BlueprintReadOnly)
-	FString ErrorMessage;
-
 	FRemoteSettingResult() = default;
 
-	FRemoteSettingResult(bool InSuccess, const FString& InKey = TEXT(""), const FString& InValue = TEXT(""), const FString& InErrorMessage = TEXT(""))
-		: FGamingServiceResult(InSuccess), Key(InKey), Value(InValue), ErrorMessage(InErrorMessage)
+	FRemoteSettingResult(bool InSuccess, const FString& InKey = TEXT(""), const FString& InValue = TEXT(""))
+		: FGamingServiceResult(InSuccess), Key(InKey), Value(InValue)
 	{
-	}
-
-	static FRemoteSettingResult Success(const FString& InKey, const FString& InValue)
-	{
-		return FRemoteSettingResult(true, InKey, InValue);
-	}
-
-	static FRemoteSettingResult Failure(const FString& InKey, const FString& InErrorMessage)
-	{
-		return FRemoteSettingResult(false, InKey, TEXT(""), InErrorMessage);
 	}
 };
 
@@ -322,23 +299,10 @@ struct GAMINGSERVICES_API FRemoteSettingsListResult : public FGamingServiceResul
 	UPROPERTY(BlueprintReadOnly)
 	TArray<FString> Keys;
 
-	UPROPERTY(BlueprintReadOnly)
-	FString ErrorMessage;
-
 	FRemoteSettingsListResult() = default;
 
-	FRemoteSettingsListResult(bool InSuccess, const TArray<FString>& InKeys = TArray<FString>(), const FString& InErrorMessage = TEXT(""))
-		: FGamingServiceResult(InSuccess), Keys(InKeys), ErrorMessage(InErrorMessage)
+	FRemoteSettingsListResult(bool InSuccess, const TArray<FString>& InKeys = TArray<FString>())
+		: FGamingServiceResult(InSuccess), Keys(InKeys)
 	{
-	}
-
-	static FRemoteSettingsListResult Success(const TArray<FString>& InKeys)
-	{
-		return FRemoteSettingsListResult(true, InKeys);
-	}
-
-	static FRemoteSettingsListResult Failure(const FString& InErrorMessage)
-	{
-		return FRemoteSettingsListResult(false, TArray<FString>(), InErrorMessage);
 	}
 };

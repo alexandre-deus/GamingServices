@@ -120,7 +120,7 @@ void FNullGamingService::ReadFile(const FString& FilePath,
 {
 	UE_LOG(LogTemp, Warning, TEXT("NullGamingService: ReadFile called for %s - no SDK available"), *FilePath);
 
-	Callback(FFileReadResult::Success(FilePath, TArray<uint8>()));
+	Callback(FFileReadResult(true, FilePath, TArray<uint8>()));
 }
 
 void FNullGamingService::DeleteFile(const FString& FilePath,
