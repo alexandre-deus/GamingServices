@@ -37,6 +37,18 @@ public:
 	virtual void ListFiles(const FString& DirectoryPath,
 	                       TFunction<void(const FFilesListResult&)> Callback) override;
 
+	virtual void CreateSession(const FSessionSettings& Settings,
+	                          TFunction<void(const FSessionCreateResult&)> Callback) override;
+	virtual void FindSessions(const FSessionSearchFilter& Filter,
+	                         TFunction<void(const FSessionSearchResult&)> Callback) override;
+	virtual void JoinSession(const FString& SessionId,
+	                        TFunction<void(const FSessionJoinResult&)> Callback) override;
+	virtual void LeaveSession(TFunction<void(const FGamingServiceResult&)> Callback) override;
+	virtual void DestroySession(TFunction<void(const FGamingServiceResult&)> Callback) override;
+	virtual void UpdateSession(const FSessionSettings& Settings,
+	                          TFunction<void(const FGamingServiceResult&)> Callback) override;
+	virtual void GetCurrentSession(TFunction<void(const FSessionInfo&)> Callback) override;
+
 	virtual void Tick() override;
 
 	virtual bool IsInitialized() const override;

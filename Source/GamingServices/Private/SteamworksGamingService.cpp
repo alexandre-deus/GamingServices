@@ -10,6 +10,17 @@
 
 class FSteamworksGamingService::FSteamworksGamingServiceImpl
 {
+private:
+	struct FLobbySearchContext
+	{
+		FSteamworksGamingServiceImpl* Impl;
+		TFunction<void(const FSessionSearchResult&)> Callback;
+		TSet<uint64> PendingLobbyIDs;  // Lobbies waiting for data
+		TArray<CSteamID> LobbyIDs;      // All lobbies
+		double StartTime = 0.0;         // When the search started
+		double TimeoutSeconds = 5.0;    // Max time to wait for lobby data
+	};
+
 public:
 	FSteamworksGamingServiceImpl(FSteamworksGamingService* InOwner) :
 		Owner(InOwner), bIsInitialized(false), bIsLoggedIn(false)
@@ -527,6 +538,73 @@ public:
 			SteamAPI_RunCallbacks();
 			UE_LOG(LogTemp, VeryVerbose, TEXT("SteamworksGamingService: Tick - Pumping call results"));
 			CallResults.Pump();
+			
+			// Process pending lobby search contexts
+			ProcessLobbySearchContexts();
+		}
+	}
+
+	void ProcessLobbySearchContexts()
+	{
+		if (ActiveSearchContexts.Num() == 0)
+		{
+			return;
+		}
+
+		double CurrentTime = FPlatformTime::Seconds();
+		TArray<TSharedPtr<FLobbySearchContext>> CompletedContexts;
+
+		for (TSharedPtr<FLobbySearchContext>& Context : ActiveSearchContexts)
+		{
+			if (!Context.IsValid())
+			{
+				CompletedContexts.Add(Context);
+				continue;
+			}
+
+			// Check for timeout
+			bool bTimedOut = (CurrentTime - Context->StartTime) > Context->TimeoutSeconds;
+			if (bTimedOut && Context->PendingLobbyIDs.Num() > 0)
+			{
+				UE_LOG(LogTemp, Warning, TEXT("SteamworksGamingService: Lobby search timed out, %d lobbies still pending"), Context->PendingLobbyIDs.Num());
+				// Continue anyway with whatever data we have
+				Context->PendingLobbyIDs.Empty();
+			}
+
+			// Check each pending lobby to see if data is now available
+			TArray<uint64> CompletedLobbies;
+			for (uint64 LobbyID : Context->PendingLobbyIDs)
+			{
+				CSteamID SteamID(LobbyID);
+				int32 DataCount = SteamMatchmaking->GetLobbyDataCount(SteamID);
+				
+				// If we have data now, mark this lobby as complete
+				if (DataCount > 0)
+				{
+					CompletedLobbies.Add(LobbyID);
+					UE_LOG(LogTemp, Verbose, TEXT("SteamworksGamingService: Lobby %llu data ready (%d entries)"), LobbyID, DataCount);
+				}
+			}
+
+			// Remove completed lobbies from pending set
+			for (uint64 CompletedID : CompletedLobbies)
+			{
+				Context->PendingLobbyIDs.Remove(CompletedID);
+			}
+
+			// If all lobbies have data (or timed out), finalize this search
+			if (Context->PendingLobbyIDs.Num() == 0)
+			{
+				UE_LOG(LogTemp, Log, TEXT("SteamworksGamingService: All lobby data received, finalizing search"));
+				FinalizeLobbySearch(Context);
+				CompletedContexts.Add(Context);
+			}
+		}
+
+		// Remove completed contexts
+		for (const TSharedPtr<FLobbySearchContext>& Completed : CompletedContexts)
+		{
+			ActiveSearchContexts.Remove(Completed);
 		}
 	}
 
@@ -541,6 +619,394 @@ public:
 
 	bool IsSteamOverlayEnabled() const { return SteamUtils ? SteamUtils->IsOverlayEnabled() : false; }
 
+	void CreateSession(const FSessionSettings& Settings, TFunction<void(const FSessionCreateResult&)> Callback)
+	{
+		checkf(bIsInitialized && bIsLoggedIn && SteamMatchmaking,
+		       TEXT("SteamworksGamingService: CreateSession called when service not ready"));
+
+		if (bIsInLobby)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("SteamworksGamingService: Already in a lobby, leaving old lobby first"));
+			DestroySession([this, Settings, Callback](const FGamingServiceResult& Result)
+			{
+				CreateSession(Settings, Callback);
+			});
+			return;
+		}
+
+		UE_LOG(LogTemp, Log, TEXT("SteamworksGamingService: Creating lobby: %s"), *Settings.SessionName);
+
+		ELobbyType LobbyType = k_ELobbyTypePublic;
+		if (Settings.Privacy == ESessionPrivacy::Private)
+			LobbyType = k_ELobbyTypePrivate;
+		else if (Settings.Privacy == ESessionPrivacy::FriendsOnly)
+			LobbyType = k_ELobbyTypeFriendsOnly;
+
+		SteamAPICall_t Handle = SteamMatchmaking->CreateLobby(LobbyType, Settings.MaxPlayers);
+		
+		CallResults.Add<LobbyCreated_t>(Handle, [this, Settings, Callback](const LobbyCreated_t& Result, bool bIOFailure)
+		{
+			FSessionCreateResult CreateResult;
+			CreateResult.bSuccess = !bIOFailure && Result.m_eResult == k_EResultOK;
+
+			if (CreateResult.bSuccess)
+			{
+				CurrentLobbyId = CSteamID(Result.m_ulSteamIDLobby);
+				bIsInLobby = true;
+				bIsLobbyHost = true;
+
+				SteamMatchmaking->SetLobbyData(CurrentLobbyId, "name", TCHAR_TO_UTF8(*Settings.SessionName));
+
+				for (const FSessionAttribute& Attr : Settings.CustomAttributes)
+				{
+					SteamMatchmaking->SetLobbyData(CurrentLobbyId, TCHAR_TO_UTF8(*Attr.Key), TCHAR_TO_UTF8(*Attr.Value));
+				}
+
+				CreateResult.SessionInfo.SessionId = FString::Printf(TEXT("%llu"), CurrentLobbyId.ConvertToUint64());
+				CreateResult.SessionInfo.SessionName = Settings.SessionName;
+				CreateResult.SessionInfo.HostUserId = UserId;
+				CreateResult.SessionInfo.HostDisplayName = DisplayName;
+				CreateResult.SessionInfo.MaxPlayers = Settings.MaxPlayers;
+				CreateResult.SessionInfo.CurrentPlayers = 1;
+				CreateResult.SessionInfo.AvailableSlots = Settings.MaxPlayers - 1;
+
+				UE_LOG(LogTemp, Log, TEXT("SteamworksGamingService: Lobby created successfully: %s"), *CreateResult.SessionInfo.SessionId);
+			}
+			else
+			{
+				UE_LOG(LogTemp, Error, TEXT("SteamworksGamingService: Failed to create lobby"));
+			}
+
+			if (Callback)
+			{
+				Callback(CreateResult);
+			}
+		});
+	}
+
+	void FindSessions(const FSessionSearchFilter& Filter, TFunction<void(const FSessionSearchResult&)> Callback)
+	{
+		checkf(bIsInitialized && bIsLoggedIn && SteamMatchmaking,
+		       TEXT("SteamworksGamingService: FindSessions called when service not ready"));
+
+		UE_LOG(LogTemp, Log, TEXT("SteamworksGamingService: Searching for lobbies, max results: %d"), Filter.MaxResults);
+
+		SteamMatchmaking->AddRequestLobbyListResultCountFilter(Filter.MaxResults);
+
+		for (const FSessionAttribute& Attr : Filter.RequiredAttributes)
+		{
+			SteamMatchmaking->AddRequestLobbyListStringFilter(TCHAR_TO_UTF8(*Attr.Key), TCHAR_TO_UTF8(*Attr.Value), k_ELobbyComparisonEqual);
+		}
+
+		SteamAPICall_t Handle = SteamMatchmaking->RequestLobbyList();
+
+		TSharedPtr<FLobbySearchContext> SearchContext = MakeShared<FLobbySearchContext>();
+		SearchContext->Impl = this;
+		SearchContext->Callback = MoveTemp(Callback);
+		SearchContext->StartTime = FPlatformTime::Seconds();
+
+		ISteamMatchmaking* MatchmakingPtr = SteamMatchmaking;
+
+		CallResults.Add<LobbyMatchList_t>(Handle, [SearchContext, MatchmakingPtr](const LobbyMatchList_t& Result, bool bIOFailure)
+		{
+			if (bIOFailure)
+			{
+				UE_LOG(LogTemp, Error, TEXT("SteamworksGamingService: Lobby search failed"));
+				FSessionSearchResult ErrorResult;
+				ErrorResult.bSuccess = false;
+				if (SearchContext->Callback)
+				{
+					SearchContext->Callback(ErrorResult);
+				}
+				return;
+			}
+
+			UE_LOG(LogTemp, Log, TEXT("SteamworksGamingService: Found %d lobbies, requesting metadata..."), Result.m_nLobbiesMatching);
+
+			if (Result.m_nLobbiesMatching == 0)
+			{
+				FSessionSearchResult EmptyResult;
+				EmptyResult.bSuccess = true;
+				if (SearchContext->Callback)
+				{
+					SearchContext->Callback(EmptyResult);
+				}
+				return;
+			}
+
+			// Collect lobby IDs
+			for (uint32 i = 0; i < Result.m_nLobbiesMatching; ++i)
+			{
+				CSteamID LobbyId = MatchmakingPtr->GetLobbyByIndex(i);
+				SearchContext->LobbyIDs.Add(LobbyId);
+				SearchContext->PendingLobbyIDs.Add(LobbyId.ConvertToUint64());
+			}
+
+			// Request metadata for all lobbies (async, triggers LobbyDataUpdate_t callbacks)
+			for (const CSteamID& LobbyId : SearchContext->LobbyIDs)
+			{
+				MatchmakingPtr->RequestLobbyData(LobbyId);
+			}
+
+			// Add to active contexts - will be processed in Tick() when data arrives
+			SearchContext->Impl->ActiveSearchContexts.Add(SearchContext);
+			
+			UE_LOG(LogTemp, Log, TEXT("SteamworksGamingService: Waiting for %d lobby metadata updates..."), SearchContext->PendingLobbyIDs.Num());
+		});
+	}
+
+	void FinalizeLobbySearch(TSharedPtr<FLobbySearchContext> SearchContext)
+	{
+		FSessionSearchResult FinalResult;
+		FinalResult.bSuccess = true;
+
+		for (const CSteamID& LobbyId : SearchContext->LobbyIDs)
+		{
+			FSessionInfo Session;
+			Session.SessionId = FString::Printf(TEXT("%llu"), LobbyId.ConvertToUint64());
+
+			const char* LobbyName = SteamMatchmaking->GetLobbyData(LobbyId, "name");
+			Session.SessionName = LobbyName && *LobbyName ? UTF8_TO_TCHAR(LobbyName) : Session.SessionId;
+
+			CSteamID OwnerID = SteamMatchmaking->GetLobbyOwner(LobbyId);
+			Session.HostUserId = FString::Printf(TEXT("%llu"), OwnerID.ConvertToUint64());
+			Session.HostDisplayName = UTF8_TO_TCHAR(SteamFriends->GetFriendPersonaName(OwnerID));
+
+			Session.MaxPlayers = SteamMatchmaking->GetLobbyMemberLimit(LobbyId);
+			Session.CurrentPlayers = SteamMatchmaking->GetNumLobbyMembers(LobbyId);
+			Session.AvailableSlots = Session.MaxPlayers - Session.CurrentPlayers;
+
+			int32 DataCount = SteamMatchmaking->GetLobbyDataCount(LobbyId);
+			UE_LOG(LogTemp, Log, TEXT("SteamworksGamingService: Lobby %llu | Name='%s' | Owner=%llu | Players=%d/%d | Metadata (%d entries):"),
+				LobbyId.ConvertToUint64(),
+				*Session.SessionName,
+				OwnerID.ConvertToUint64(),
+				Session.CurrentPlayers,
+				Session.MaxPlayers,
+				DataCount);
+			
+			for (int32 j = 0; j < DataCount; ++j)
+			{
+				char Key[256] = {0};
+				char Value[256] = {0};
+				if (SteamMatchmaking->GetLobbyDataByIndex(LobbyId, j, Key, 256, Value, 256))
+				{
+					UE_LOG(LogTemp, Log, TEXT("SteamworksGamingService:   [%d] '%s' = '%s'"), j, UTF8_TO_TCHAR(Key), UTF8_TO_TCHAR(Value));
+					FSessionAttribute Attr;
+					Attr.Key = UTF8_TO_TCHAR(Key);
+					Attr.Value = UTF8_TO_TCHAR(Value);
+					Session.CustomAttributes.Add(Attr);
+				}
+			}
+
+			FinalResult.Sessions.Add(Session);
+		}
+
+		UE_LOG(LogTemp, Log, TEXT("SteamworksGamingService: Returning %d lobbies with metadata"), FinalResult.Sessions.Num());
+
+		if (SearchContext->Callback)
+		{
+			SearchContext->Callback(FinalResult);
+		}
+	}
+
+	void JoinSession(const FString& SessionId, TFunction<void(const FSessionJoinResult&)> Callback)
+	{
+		checkf(bIsInitialized && bIsLoggedIn && SteamMatchmaking,
+		       TEXT("SteamworksGamingService: JoinSession called when service not ready"));
+
+		if (bIsInLobby)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("SteamworksGamingService: Already in a lobby, leaving old lobby first"));
+			LeaveSession([this, SessionId, Callback](const FGamingServiceResult& Result)
+			{
+				JoinSession(SessionId, Callback);
+			});
+			return;
+		}
+
+		UE_LOG(LogTemp, Log, TEXT("SteamworksGamingService: Joining lobby: %s"), *SessionId);
+
+		uint64 LobbyIdUint64 = FCString::Strtoui64(*SessionId, nullptr, 10);
+		CSteamID LobbyId(LobbyIdUint64);
+
+		SteamAPICall_t Handle = SteamMatchmaking->JoinLobby(LobbyId);
+
+		CallResults.Add<LobbyEnter_t>(Handle, [this, SessionId, Callback](const LobbyEnter_t& Result, bool bIOFailure)
+		{
+			FSessionJoinResult JoinResult;
+			JoinResult.bSuccess = !bIOFailure && (Result.m_EChatRoomEnterResponse == k_EChatRoomEnterResponseSuccess);
+
+			if (JoinResult.bSuccess)
+			{
+				CurrentLobbyId = CSteamID(Result.m_ulSteamIDLobby);
+				bIsInLobby = true;
+				bIsLobbyHost = false;
+
+				JoinResult.SessionInfo.SessionId = SessionId;
+				
+				const char* LobbyName = SteamMatchmaking->GetLobbyData(CurrentLobbyId, "name");
+				JoinResult.SessionInfo.SessionName = LobbyName && *LobbyName ? UTF8_TO_TCHAR(LobbyName) : SessionId;
+
+				CSteamID OwnerID = SteamMatchmaking->GetLobbyOwner(CurrentLobbyId);
+				JoinResult.SessionInfo.HostUserId = FString::Printf(TEXT("%llu"), OwnerID.ConvertToUint64());
+				JoinResult.SessionInfo.HostDisplayName = UTF8_TO_TCHAR(SteamFriends->GetFriendPersonaName(OwnerID));
+
+				JoinResult.SessionInfo.MaxPlayers = SteamMatchmaking->GetLobbyMemberLimit(CurrentLobbyId);
+				JoinResult.SessionInfo.CurrentPlayers = SteamMatchmaking->GetNumLobbyMembers(CurrentLobbyId);
+				JoinResult.SessionInfo.AvailableSlots = JoinResult.SessionInfo.MaxPlayers - JoinResult.SessionInfo.CurrentPlayers;
+
+				UE_LOG(LogTemp, Log, TEXT("SteamworksGamingService: Successfully joined lobby"));
+			}
+			else
+			{
+				UE_LOG(LogTemp, Error, TEXT("SteamworksGamingService: Failed to join lobby"));
+			}
+
+			if (Callback)
+			{
+				Callback(JoinResult);
+			}
+		});
+	}
+
+	void LeaveSession(TFunction<void(const FGamingServiceResult&)> Callback)
+	{
+		checkf(bIsInitialized && bIsLoggedIn && SteamMatchmaking,
+		       TEXT("SteamworksGamingService: LeaveSession called when service not ready"));
+
+		if (!bIsInLobby)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("SteamworksGamingService: Not in a lobby"));
+			if (Callback)
+			{
+				Callback(FGamingServiceResult(true));
+			}
+			return;
+		}
+
+		UE_LOG(LogTemp, Log, TEXT("SteamworksGamingService: Leaving lobby"));
+
+		SteamMatchmaking->LeaveLobby(CurrentLobbyId);
+		
+		bIsInLobby = false;
+		bIsLobbyHost = false;
+		CurrentLobbyId = CSteamID();
+
+		UE_LOG(LogTemp, Log, TEXT("SteamworksGamingService: Successfully left lobby"));
+
+		if (Callback)
+		{
+			Callback(FGamingServiceResult(true));
+		}
+	}
+
+	void DestroySession(TFunction<void(const FGamingServiceResult&)> Callback)
+	{
+		checkf(bIsInitialized && bIsLoggedIn && SteamMatchmaking,
+		       TEXT("SteamworksGamingService: DestroySession called when service not ready"));
+
+		if (!bIsInLobby)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("SteamworksGamingService: Not in a lobby"));
+			if (Callback)
+			{
+				Callback(FGamingServiceResult(true));
+			}
+			return;
+		}
+
+		UE_LOG(LogTemp, Log, TEXT("SteamworksGamingService: Destroying lobby"));
+
+		SteamMatchmaking->LeaveLobby(CurrentLobbyId);
+		
+		bIsInLobby = false;
+		bIsLobbyHost = false;
+		CurrentLobbyId = CSteamID();
+
+		UE_LOG(LogTemp, Log, TEXT("SteamworksGamingService: Successfully destroyed lobby"));
+
+		if (Callback)
+		{
+			Callback(FGamingServiceResult(true));
+		}
+	}
+
+	void UpdateSession(const FSessionSettings& Settings, TFunction<void(const FGamingServiceResult&)> Callback)
+	{
+		checkf(bIsInitialized && bIsLoggedIn && SteamMatchmaking,
+		       TEXT("SteamworksGamingService: UpdateSession called when service not ready"));
+
+		if (!bIsInLobby || !bIsLobbyHost)
+		{
+			UE_LOG(LogTemp, Error, TEXT("SteamworksGamingService: Cannot update lobby - not hosting a lobby"));
+			if (Callback)
+			{
+				Callback(FGamingServiceResult(false));
+			}
+			return;
+		}
+
+		UE_LOG(LogTemp, Log, TEXT("SteamworksGamingService: Updating lobby"));
+
+		bool bSuccess = true;
+
+		if (!Settings.SessionName.IsEmpty())
+		{
+			bSuccess &= SteamMatchmaking->SetLobbyData(CurrentLobbyId, "name", TCHAR_TO_UTF8(*Settings.SessionName));
+		}
+		
+		if (Settings.MaxPlayers > 0)
+		{
+			bSuccess &= SteamMatchmaking->SetLobbyMemberLimit(CurrentLobbyId, Settings.MaxPlayers);
+		}
+
+		for (const FSessionAttribute& Attr : Settings.CustomAttributes)
+		{
+			bSuccess &= SteamMatchmaking->SetLobbyData(CurrentLobbyId, TCHAR_TO_UTF8(*Attr.Key), TCHAR_TO_UTF8(*Attr.Value));
+		}
+
+		if (bSuccess)
+		{
+			UE_LOG(LogTemp, Log, TEXT("SteamworksGamingService: Lobby updated successfully"));
+		}
+		else
+		{
+			UE_LOG(LogTemp, Error, TEXT("SteamworksGamingService: Failed to update some lobby data"));
+		}
+
+		if (Callback)
+		{
+			Callback(FGamingServiceResult(bSuccess));
+		}
+	}
+
+	void GetCurrentSession(TFunction<void(const FSessionInfo&)> Callback)
+	{
+		FSessionInfo Info;
+		
+		if (bIsInLobby && CurrentLobbyId.IsValid())
+		{
+			Info.SessionId = FString::Printf(TEXT("%llu"), CurrentLobbyId.ConvertToUint64());
+			
+			const char* LobbyName = SteamMatchmaking->GetLobbyData(CurrentLobbyId, "name");
+			Info.SessionName = LobbyName && *LobbyName ? UTF8_TO_TCHAR(LobbyName) : Info.SessionId;
+
+			CSteamID OwnerID = SteamMatchmaking->GetLobbyOwner(CurrentLobbyId);
+			Info.HostUserId = FString::Printf(TEXT("%llu"), OwnerID.ConvertToUint64());
+			Info.HostDisplayName = UTF8_TO_TCHAR(SteamFriends->GetFriendPersonaName(OwnerID));
+
+			Info.MaxPlayers = SteamMatchmaking->GetLobbyMemberLimit(CurrentLobbyId);
+			Info.CurrentPlayers = SteamMatchmaking->GetNumLobbyMembers(CurrentLobbyId);
+			Info.AvailableSlots = Info.MaxPlayers - Info.CurrentPlayers;
+		}
+
+		if (Callback)
+		{
+			Callback(Info);
+		}
+	}
+
 private:
 	FSteamworksGamingService* Owner;
 
@@ -554,6 +1020,13 @@ private:
 	ISteamUtils* SteamUtils;
 	ISteamFriends* SteamFriends;
 	ISteamRemoteStorage* SteamRemoteStorage;
+	ISteamMatchmaking* SteamMatchmaking;
+
+	CSteamID CurrentLobbyId;
+	bool bIsInLobby;
+	bool bIsLobbyHost;
+
+	TArray<TSharedPtr<FLobbySearchContext>> ActiveSearchContexts;
 
 	FCriticalSection CallbackCriticalSection;
 
@@ -760,8 +1233,9 @@ private:
 		SteamUtils = ::SteamUtils();
 		SteamFriends = ::SteamFriends();
 		SteamRemoteStorage = ::SteamRemoteStorage();
+		SteamMatchmaking = ::SteamMatchmaking();
 
-		if (!SteamUserStats || !SteamUser || !SteamUtils || !SteamFriends || !SteamRemoteStorage)
+		if (!SteamUserStats || !SteamUser || !SteamUtils || !SteamFriends || !SteamRemoteStorage || !SteamMatchmaking)
 		{
 			UE_LOG(LogTemp, Error, TEXT("SteamworksGamingService: Failed to get Steam interfaces"));
 			SteamAPI_Shutdown();
@@ -769,6 +1243,10 @@ private:
 		}
 
 		CallResults.Initialize(SteamUtils);
+
+		bIsInLobby = false;
+		bIsLobbyHost = false;
+		CurrentLobbyId = CSteamID();
 
 		if (SteamUser->BLoggedOn())
 		{
@@ -890,5 +1368,44 @@ FString FSteamworksGamingService::GetDisplayName() const { return Impl->GetDispl
 bool FSteamworksGamingService::IsSteamRunning() const { return Impl->IsSteamRunning(); }
 
 bool FSteamworksGamingService::IsSteamOverlayEnabled() const { return Impl->IsSteamOverlayEnabled(); }
+
+void FSteamworksGamingService::CreateSession(const FSessionSettings& Settings,
+                                             TFunction<void(const FSessionCreateResult&)> Callback)
+{
+	Impl->CreateSession(Settings, MoveTemp(Callback));
+}
+
+void FSteamworksGamingService::FindSessions(const FSessionSearchFilter& Filter,
+                                            TFunction<void(const FSessionSearchResult&)> Callback)
+{
+	Impl->FindSessions(Filter, MoveTemp(Callback));
+}
+
+void FSteamworksGamingService::JoinSession(const FString& SessionId,
+                                           TFunction<void(const FSessionJoinResult&)> Callback)
+{
+	Impl->JoinSession(SessionId, MoveTemp(Callback));
+}
+
+void FSteamworksGamingService::LeaveSession(TFunction<void(const FGamingServiceResult&)> Callback)
+{
+	Impl->LeaveSession(MoveTemp(Callback));
+}
+
+void FSteamworksGamingService::DestroySession(TFunction<void(const FGamingServiceResult&)> Callback)
+{
+	Impl->DestroySession(MoveTemp(Callback));
+}
+
+void FSteamworksGamingService::UpdateSession(const FSessionSettings& Settings,
+                                             TFunction<void(const FGamingServiceResult&)> Callback)
+{
+	Impl->UpdateSession(Settings, MoveTemp(Callback));
+}
+
+void FSteamworksGamingService::GetCurrentSession(TFunction<void(const FSessionInfo&)> Callback)
+{
+	Impl->GetCurrentSession(MoveTemp(Callback));
+}
 
 #endif

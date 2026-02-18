@@ -36,6 +36,18 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGamingRemoteSettingDeleted, const
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGamingRemoteSettingsListed, const FRemoteSettingsListResult&, Result);
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGamingSessionCreated, const FSessionCreateResult&, Result);
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGamingSessionsFound, const FSessionSearchResult&, Result);
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGamingSessionJoined, const FSessionJoinResult&, Result);
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGamingSessionLeft, const FGamingServiceResult&, Result);
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGamingSessionDestroyed, const FGamingServiceResult&, Result);
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGamingSessionUpdated, const FGamingServiceResult&, Result);
+
 UCLASS()
 class GAMINGSERVICES_API UGamingServicesSubsystem : public UGameInstanceSubsystem, public FTickableGameObject
 {
@@ -96,6 +108,28 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "GamingServices|Settings")
 	void ListRemoteSettings();
 
+	// Matchmaking API
+	UFUNCTION(BlueprintCallable, Category = "GamingServices|Matchmaking")
+	void CreateSession(const FSessionSettings& Settings);
+
+	UFUNCTION(BlueprintCallable, Category = "GamingServices|Matchmaking")
+	void FindSessions(const FSessionSearchFilter& Filter);
+
+	UFUNCTION(BlueprintCallable, Category = "GamingServices|Matchmaking")
+	void JoinSession(const FString& SessionId);
+
+	UFUNCTION(BlueprintCallable, Category = "GamingServices|Matchmaking")
+	void LeaveSession();
+
+	UFUNCTION(BlueprintCallable, Category = "GamingServices|Matchmaking")
+	void DestroySession();
+
+	UFUNCTION(BlueprintCallable, Category = "GamingServices|Matchmaking")
+	void UpdateSession(const FSessionSettings& Settings);
+
+	UFUNCTION(BlueprintCallable, Category = "GamingServices|Matchmaking")
+	void GetCurrentSessionInfo();
+
 	// Auth/query helpers for Blueprints
 	UFUNCTION(BlueprintPure, Category = "GamingServices")
 	bool IsConnected() const;
@@ -139,6 +173,18 @@ public:
 	FOnGamingRemoteSettingDeleted OnRemoteSettingDeleted;
 	UPROPERTY(BlueprintAssignable, Category = "GamingServices|Events")
 	FOnGamingRemoteSettingsListed OnRemoteSettingsListed;
+	UPROPERTY(BlueprintAssignable, Category = "GamingServices|Events")
+	FOnGamingSessionCreated OnSessionCreated;
+	UPROPERTY(BlueprintAssignable, Category = "GamingServices|Events")
+	FOnGamingSessionsFound OnSessionsFound;
+	UPROPERTY(BlueprintAssignable, Category = "GamingServices|Events")
+	FOnGamingSessionJoined OnSessionJoined;
+	UPROPERTY(BlueprintAssignable, Category = "GamingServices|Events")
+	FOnGamingSessionLeft OnSessionLeft;
+	UPROPERTY(BlueprintAssignable, Category = "GamingServices|Events")
+	FOnGamingSessionDestroyed OnSessionDestroyed;
+	UPROPERTY(BlueprintAssignable, Category = "GamingServices|Events")
+	FOnGamingSessionUpdated OnSessionUpdated;
 
 	FGamingService& GetService() const { return *Service; }
 

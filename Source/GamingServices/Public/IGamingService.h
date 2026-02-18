@@ -46,6 +46,18 @@ public:
 	                                 TFunction<void(const FGamingServiceResult&)> Callback);
 	virtual void ListRemoteSettings(TFunction<void(const TArray<FString>& Keys)> Callback);
 
+	virtual void CreateSession(const FSessionSettings& Settings,
+	                          TFunction<void(const FSessionCreateResult&)> Callback) = 0;
+	virtual void FindSessions(const FSessionSearchFilter& Filter,
+	                         TFunction<void(const FSessionSearchResult&)> Callback) = 0;
+	virtual void JoinSession(const FString& SessionId,
+	                        TFunction<void(const FSessionJoinResult&)> Callback) = 0;
+	virtual void LeaveSession(TFunction<void(const FGamingServiceResult&)> Callback) = 0;
+	virtual void DestroySession(TFunction<void(const FGamingServiceResult&)> Callback) = 0;
+	virtual void UpdateSession(const FSessionSettings& Settings,
+	                          TFunction<void(const FGamingServiceResult&)> Callback) = 0;
+	virtual void GetCurrentSession(TFunction<void(const FSessionInfo&)> Callback) = 0;
+
 	virtual void Tick() = 0;
 
 	virtual bool IsInitialized() const = 0;

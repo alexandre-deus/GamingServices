@@ -145,6 +145,82 @@ void FNullGamingService::ListFiles(const FString& DirectoryPath,
 	Callback(Result);
 }
 
+void FNullGamingService::CreateSession(const FSessionSettings& Settings,
+                                       TFunction<void(const FSessionCreateResult&)> Callback)
+{
+	UE_LOG(LogTemp, Warning, TEXT("NullGamingService: CreateSession called for %s - no SDK available"), *Settings.SessionName);
+
+	FSessionCreateResult Result;
+	Result.bSuccess = true;
+	Result.SessionInfo.SessionName = Settings.SessionName;
+	Result.SessionInfo.SessionId = TEXT("NullSession");
+
+	Callback(Result);
+}
+
+void FNullGamingService::FindSessions(const FSessionSearchFilter& Filter,
+                                      TFunction<void(const FSessionSearchResult&)> Callback)
+{
+	UE_LOG(LogTemp, Warning, TEXT("NullGamingService: FindSessions called - no SDK available"));
+
+	FSessionSearchResult Result;
+	Result.bSuccess = true;
+
+	Callback(Result);
+}
+
+void FNullGamingService::JoinSession(const FString& SessionId,
+                                     TFunction<void(const FSessionJoinResult&)> Callback)
+{
+	UE_LOG(LogTemp, Warning, TEXT("NullGamingService: JoinSession called for %s - no SDK available"), *SessionId);
+
+	FSessionJoinResult Result;
+	Result.bSuccess = true;
+	Result.SessionInfo.SessionId = SessionId;
+
+	Callback(Result);
+}
+
+void FNullGamingService::LeaveSession(TFunction<void(const FGamingServiceResult&)> Callback)
+{
+	UE_LOG(LogTemp, Warning, TEXT("NullGamingService: LeaveSession called - no SDK available"));
+
+	FGamingServiceResult Result;
+	Result.bSuccess = true;
+
+	Callback(Result);
+}
+
+void FNullGamingService::DestroySession(TFunction<void(const FGamingServiceResult&)> Callback)
+{
+	UE_LOG(LogTemp, Warning, TEXT("NullGamingService: DestroySession called - no SDK available"));
+
+	FGamingServiceResult Result;
+	Result.bSuccess = true;
+
+	Callback(Result);
+}
+
+void FNullGamingService::UpdateSession(const FSessionSettings& Settings,
+                                       TFunction<void(const FGamingServiceResult&)> Callback)
+{
+	UE_LOG(LogTemp, Warning, TEXT("NullGamingService: UpdateSession called for %s - no SDK available"), *Settings.SessionName);
+
+	FGamingServiceResult Result;
+	Result.bSuccess = true;
+
+	Callback(Result);
+}
+
+void FNullGamingService::GetCurrentSession(TFunction<void(const FSessionInfo&)> Callback)
+{
+	UE_LOG(LogTemp, Warning, TEXT("NullGamingService: GetCurrentSession called - no SDK available"));
+
+	FSessionInfo Info;
+
+	Callback(Info);
+}
+
 void FNullGamingService::Tick()
 {
 }
