@@ -5,8 +5,21 @@ Cross-platform abstraction over common gaming platform services. Supports Epic O
 ### Features
 - Unified API for multiple backends (EOS, Steamworks)
 - Blueprint callable subsystem (`UGamingServicesSubsystem`)
-- Achievements, Leaderboards, and Stats
-- Runtime-switchable login methods for EOS
+- Achievements
+- Leaderboards
+- Stats
+- Cloud storage
+- Cloud config
+- Sessions/Matchmaking
+
+### Planned features
+- Google Play Services API support as a backend
+- Per-backend capability querying: Move code backend code into interfaces that the user can query as not all backends support the same features
+- (Possibly) Unified achievements system: Currently achievement names have to be called with backend specific name, but it would be better to accept the names/requirements for each backend or something of the sort
+- Look into testing
+- Entitlements
+- Error standardization
+- Optional extension interfaces (backend-specific advanced features): IGamingServicesSteamExtension (SteamUGC, SteamWorkshop, SteamInventory)
 
 ---
 
@@ -132,7 +145,7 @@ Example (Blueprint):
 ### 5.5) Stats
 - `IngestStat(StatName, Amount)`
 - `QueryStat(StatName)`
-- Bind to `OnStatIngested` and `OnStatQueried`.
+- Bind to `OnStatProgressed` and `OnStatQueried`.
 
 ### 5.6) Auth Helpers
 - `IsConnected()`, `IsLoggedIn()`, `NeedsLogin()`
