@@ -116,8 +116,8 @@ public:
 	void FindSessions(const FSessionSearchFilter& Filter);
 
 	UFUNCTION(BlueprintCallable, Category = "GamingServices|Matchmaking")
-	void JoinSession(const FString& SessionId);
-
+	void JoinSession(const FSessionJoinHandle& JoinHandle);
+	
 	UFUNCTION(BlueprintCallable, Category = "GamingServices|Matchmaking")
 	void LeaveSession();
 

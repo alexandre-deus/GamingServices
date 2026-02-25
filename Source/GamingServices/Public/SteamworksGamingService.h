@@ -41,7 +41,7 @@ public:
 	                          TFunction<void(const FSessionCreateResult&)> Callback) override;
 	virtual void FindSessions(const FSessionSearchFilter& Filter,
 	                         TFunction<void(const FSessionSearchResult&)> Callback) override;
-	virtual void JoinSession(const FString& SessionId,
+	virtual void JoinSession(const FSessionJoinHandle& JoinHandle,
 	                        TFunction<void(const FSessionJoinResult&)> Callback) override;
 	virtual void LeaveSession(TFunction<void(const FGamingServiceResult&)> Callback) override;
 	virtual void DestroySession(TFunction<void(const FGamingServiceResult&)> Callback) override;

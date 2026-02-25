@@ -311,6 +311,15 @@ struct GAMINGSERVICES_API FRemoteSettingsListResult : public FGamingServiceResul
 // Matchmaking Types
 // ============================================================================
 
+class ISessionJoinHandle{};
+
+USTRUCT(BlueprintType)
+struct FSessionJoinHandle
+{
+	GENERATED_BODY()
+	TSharedPtr<ISessionJoinHandle> BackendHandle;
+};
+
 UENUM(BlueprintType)
 enum class ESessionPrivacy : uint8
 {
@@ -374,9 +383,6 @@ struct GAMINGSERVICES_API FSessionInfo
 	GENERATED_BODY()
 
 	UPROPERTY(BlueprintReadOnly)
-	FString SessionId;
-
-	UPROPERTY(BlueprintReadOnly)
 	FString SessionName;
 
 	UPROPERTY(BlueprintReadOnly)
@@ -405,6 +411,9 @@ struct GAMINGSERVICES_API FSessionInfo
 
 	UPROPERTY(BlueprintReadOnly)
 	TArray<FSessionAttribute> CustomAttributes;
+
+	UPROPERTY(BlueprintReadOnly)
+	FSessionJoinHandle JoinHandle;
 
 	FSessionInfo() = default;
 };

@@ -194,9 +194,9 @@ void UGamingServicesSubsystem::FindSessions(const FSessionSearchFilter& Filter)
 	});
 }
 
-void UGamingServicesSubsystem::JoinSession(const FString& SessionId)
+void UGamingServicesSubsystem::JoinSession(const FSessionJoinHandle& JoinHandle)
 {
-	Service->JoinSession(SessionId, [this](const FSessionJoinResult& R)
+	Service->JoinSession(JoinHandle, [this](const FSessionJoinResult& R)
 	{
 		OnSessionJoined.Broadcast(R);
 	});
@@ -230,7 +230,6 @@ void UGamingServicesSubsystem::GetCurrentSessionInfo()
 {
 	Service->GetCurrentSession([this](const FSessionInfo& Info)
 	{
-		// For now, just log the session info. You could add a delegate for this if needed
-		UE_LOG(LogTemp, Log, TEXT("Current Session: %s (ID: %s)"), *Info.SessionName, *Info.SessionId);
+		UE_LOG(LogTemp, Log, TEXT("Current Session: %s"), *Info.SessionName);
 	});
 }

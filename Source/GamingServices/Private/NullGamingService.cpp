@@ -153,7 +153,6 @@ void FNullGamingService::CreateSession(const FSessionSettings& Settings,
 	FSessionCreateResult Result;
 	Result.bSuccess = true;
 	Result.SessionInfo.SessionName = Settings.SessionName;
-	Result.SessionInfo.SessionId = TEXT("NullSession");
 
 	Callback(Result);
 }
@@ -169,14 +168,13 @@ void FNullGamingService::FindSessions(const FSessionSearchFilter& Filter,
 	Callback(Result);
 }
 
-void FNullGamingService::JoinSession(const FString& SessionId,
+void FNullGamingService::JoinSession(const FSessionJoinHandle& JoinHandle,
                                      TFunction<void(const FSessionJoinResult&)> Callback)
 {
-	UE_LOG(LogTemp, Warning, TEXT("NullGamingService: JoinSession called for %s - no SDK available"), *SessionId);
+	UE_LOG(LogTemp, Warning, TEXT("NullGamingService: JoinSession called - no SDK available"));
 
 	FSessionJoinResult Result;
 	Result.bSuccess = true;
-	Result.SessionInfo.SessionId = SessionId;
 
 	Callback(Result);
 }

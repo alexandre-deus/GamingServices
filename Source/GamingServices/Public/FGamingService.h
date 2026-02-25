@@ -50,7 +50,7 @@ public:
 	                          TFunction<void(const FSessionCreateResult&)> Callback) = 0;
 	virtual void FindSessions(const FSessionSearchFilter& Filter,
 	                         TFunction<void(const FSessionSearchResult&)> Callback) = 0;
-	virtual void JoinSession(const FString& SessionId,
+	virtual void JoinSession(const FSessionJoinHandle& JoinHandle,
 	                        TFunction<void(const FSessionJoinResult&)> Callback) = 0;
 	virtual void LeaveSession(TFunction<void(const FGamingServiceResult&)> Callback) = 0;
 	virtual void DestroySession(TFunction<void(const FGamingServiceResult&)> Callback) = 0;

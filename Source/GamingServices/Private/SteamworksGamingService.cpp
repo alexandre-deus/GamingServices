@@ -8,22 +8,19 @@
 
 #include "steam/steam_api.h"
 
+struct FSteamworksSessionJoinHandle : public ISessionJoinHandle
+{
+	CSteamID LobbyId;
+	
+	FSteamworksSessionJoinHandle(const CSteamID& InLobbyId)
+		: LobbyId(InLobbyId) {}
+};
+
 class FSteamworksGamingService::FSteamworksGamingServiceImpl
 {
-private:
-	struct FLobbySearchContext
-	{
-		FSteamworksGamingServiceImpl* Impl;
-		TFunction<void(const FSessionSearchResult&)> Callback;
-		TSet<uint64> PendingLobbyIDs;  // Lobbies waiting for data
-		TArray<CSteamID> LobbyIDs;      // All lobbies
-		double StartTime = 0.0;         // When the search started
-		double TimeoutSeconds = 5.0;    // Max time to wait for lobby data
-	};
-
 public:
-	FSteamworksGamingServiceImpl(FSteamworksGamingService* InOwner) :
-		Owner(InOwner), bIsInitialized(false), bIsLoggedIn(false)
+	explicit FSteamworksGamingServiceImpl(FSteamworksGamingService* InOwner) :
+		Owner(InOwner)
 	{
 	}
 
@@ -662,7 +659,6 @@ public:
 					SteamMatchmaking->SetLobbyData(CurrentLobbyId, TCHAR_TO_UTF8(*Attr.Key), TCHAR_TO_UTF8(*Attr.Value));
 				}
 
-				CreateResult.SessionInfo.SessionId = FString::Printf(TEXT("%llu"), CurrentLobbyId.ConvertToUint64());
 				CreateResult.SessionInfo.SessionName = Settings.SessionName;
 				CreateResult.SessionInfo.HostUserId = UserId;
 				CreateResult.SessionInfo.HostDisplayName = DisplayName;
@@ -670,7 +666,7 @@ public:
 				CreateResult.SessionInfo.CurrentPlayers = 1;
 				CreateResult.SessionInfo.AvailableSlots = Settings.MaxPlayers - 1;
 
-				UE_LOG(LogTemp, Log, TEXT("SteamworksGamingService: Lobby created successfully: %s"), *CreateResult.SessionInfo.SessionId);
+				UE_LOG(LogTemp, Log, TEXT("SteamworksGamingService: Lobby created successfully: %llu"), CurrentLobbyId.ConvertToUint64());
 			}
 			else
 			{
@@ -755,6 +751,16 @@ public:
 		});
 	}
 
+	struct FLobbySearchContext
+	{
+		FSteamworksGamingServiceImpl* Impl;
+		TFunction<void(const FSessionSearchResult&)> Callback;
+		TSet<uint64> PendingLobbyIDs;  // Lobbies waiting for data
+		TArray<CSteamID> LobbyIDs;      // All lobbies
+		double StartTime = 0.0;         // When the search started
+		double TimeoutSeconds = 5.0;    // Max time to wait for lobby data
+	};
+
 	void FinalizeLobbySearch(TSharedPtr<FLobbySearchContext> SearchContext)
 	{
 		FSessionSearchResult FinalResult;
@@ -763,10 +769,10 @@ public:
 		for (const CSteamID& LobbyId : SearchContext->LobbyIDs)
 		{
 			FSessionInfo Session;
-			Session.SessionId = FString::Printf(TEXT("%llu"), LobbyId.ConvertToUint64());
+			Session.JoinHandle.BackendHandle = MakeShared<FSteamworksSessionJoinHandle>(LobbyId);
 
 			const char* LobbyName = SteamMatchmaking->GetLobbyData(LobbyId, "name");
-			Session.SessionName = LobbyName && *LobbyName ? UTF8_TO_TCHAR(LobbyName) : Session.SessionId;
+			Session.SessionName = LobbyName;
 
 			CSteamID OwnerID = SteamMatchmaking->GetLobbyOwner(LobbyId);
 			Session.HostUserId = FString::Printf(TEXT("%llu"), OwnerID.ConvertToUint64());
@@ -810,29 +816,37 @@ public:
 		}
 	}
 
-	void JoinSession(const FString& SessionId, TFunction<void(const FSessionJoinResult&)> Callback)
-	{
+	void JoinSession(const FSessionJoinHandle& JoinHandle, TFunction<void(const FSessionJoinResult&)> Callback) {
 		checkf(bIsInitialized && bIsLoggedIn && SteamMatchmaking,
 		       TEXT("SteamworksGamingService: JoinSession called when service not ready"));
+
+		
+		TSharedPtr<FSteamworksSessionJoinHandle> SteamworksHandle = StaticCastSharedPtr<FSteamworksSessionJoinHandle>(JoinHandle.BackendHandle);
+		if (SteamworksHandle->LobbyId.IsValid())
+		{
+			UE_LOG(LogTemp, Error, TEXT("SteamworksGamingService: JoinSession called with an invalid LoobbyId."));
+			FSessionJoinResult FailResult;
+			FailResult.bSuccess = false;
+			Callback(FailResult);
+			return;
+		}
 
 		if (bIsInLobby)
 		{
 			UE_LOG(LogTemp, Warning, TEXT("SteamworksGamingService: Already in a lobby, leaving old lobby first"));
-			LeaveSession([this, SessionId, Callback](const FGamingServiceResult& Result)
+			LeaveSession([this, JoinHandle, Callback](const FGamingServiceResult& Result)
 			{
-				JoinSession(SessionId, Callback);
+				JoinSession(JoinHandle, Callback);
 			});
 			return;
 		}
 
-		UE_LOG(LogTemp, Log, TEXT("SteamworksGamingService: Joining lobby: %s"), *SessionId);
+		uint64 SteamIdUint64 = SteamworksHandle->LobbyId.ConvertToUint64();
+		UE_LOG(LogTemp, Log, TEXT("SteamworksGamingService: Joining lobby: %llu"), SteamIdUint64);
 
-		uint64 LobbyIdUint64 = FCString::Strtoui64(*SessionId, nullptr, 10);
-		CSteamID LobbyId(LobbyIdUint64);
+		SteamAPICall_t Handle = SteamMatchmaking->JoinLobby(SteamworksHandle->LobbyId);
 
-		SteamAPICall_t Handle = SteamMatchmaking->JoinLobby(LobbyId);
-
-		CallResults.Add<LobbyEnter_t>(Handle, [this, SessionId, Callback](const LobbyEnter_t& Result, bool bIOFailure)
+		CallResults.Add<LobbyEnter_t>(Handle, [this, Callback](const LobbyEnter_t& Result, bool bIOFailure)
 		{
 			FSessionJoinResult JoinResult;
 			JoinResult.bSuccess = !bIOFailure && (Result.m_EChatRoomEnterResponse == k_EChatRoomEnterResponseSuccess);
@@ -842,11 +856,9 @@ public:
 				CurrentLobbyId = CSteamID(Result.m_ulSteamIDLobby);
 				bIsInLobby = true;
 				bIsLobbyHost = false;
-
-				JoinResult.SessionInfo.SessionId = SessionId;
 				
 				const char* LobbyName = SteamMatchmaking->GetLobbyData(CurrentLobbyId, "name");
-				JoinResult.SessionInfo.SessionName = LobbyName && *LobbyName ? UTF8_TO_TCHAR(LobbyName) : SessionId;
+				JoinResult.SessionInfo.SessionName = UTF8_TO_TCHAR(LobbyName);
 
 				CSteamID OwnerID = SteamMatchmaking->GetLobbyOwner(CurrentLobbyId);
 				JoinResult.SessionInfo.HostUserId = FString::Printf(TEXT("%llu"), OwnerID.ConvertToUint64());
@@ -987,10 +999,8 @@ public:
 		
 		if (bIsInLobby && CurrentLobbyId.IsValid())
 		{
-			Info.SessionId = FString::Printf(TEXT("%llu"), CurrentLobbyId.ConvertToUint64());
-			
 			const char* LobbyName = SteamMatchmaking->GetLobbyData(CurrentLobbyId, "name");
-			Info.SessionName = LobbyName && *LobbyName ? UTF8_TO_TCHAR(LobbyName) : Info.SessionId;
+			Info.SessionName = LobbyName;
 
 			CSteamID OwnerID = SteamMatchmaking->GetLobbyOwner(CurrentLobbyId);
 			Info.HostUserId = FString::Printf(TEXT("%llu"), OwnerID.ConvertToUint64());
@@ -1010,21 +1020,21 @@ public:
 private:
 	FSteamworksGamingService* Owner;
 
-	bool bIsInitialized;
-	bool bIsLoggedIn;
+	bool bIsInitialized = false;
+	bool bIsLoggedIn = false;
 	FString UserId;
 	FString DisplayName;
 
-	ISteamUserStats* SteamUserStats;
-	ISteamUser* SteamUser;
-	ISteamUtils* SteamUtils;
-	ISteamFriends* SteamFriends;
-	ISteamRemoteStorage* SteamRemoteStorage;
-	ISteamMatchmaking* SteamMatchmaking;
+	ISteamUserStats* SteamUserStats = nullptr;
+	ISteamUser* SteamUser = nullptr;
+	ISteamUtils* SteamUtils = nullptr;
+	ISteamFriends* SteamFriends = nullptr;
+	ISteamRemoteStorage* SteamRemoteStorage = nullptr;
+	ISteamMatchmaking* SteamMatchmaking = nullptr;
 
 	CSteamID CurrentLobbyId;
-	bool bIsInLobby;
-	bool bIsLobbyHost;
+	bool bIsInLobby = false;
+	bool bIsLobbyHost = false;
 
 	TArray<TSharedPtr<FLobbySearchContext>> ActiveSearchContexts;
 
@@ -1290,14 +1300,12 @@ bool FSteamworksGamingService::Connect(const FGamingServiceConnectParams& Params
 
 void FSteamworksGamingService::Shutdown() { Impl->Shutdown(); }
 
-void FSteamworksGamingService::Login(const FGamingServiceLoginParams& Params,
-									 TFunction<void(const FGamingServiceResult&)> Callback)
+void FSteamworksGamingService::Login(const FGamingServiceLoginParams& Params, TFunction<void(const FGamingServiceResult&)> Callback)
 {
 	Callback(FGamingServiceResult(true));
 }
 
-void FSteamworksGamingService::UnlockAchievement(const FString& AchievementId,
-												 TFunction<void(const FGamingServiceResult&)> Callback)
+void FSteamworksGamingService::UnlockAchievement(const FString& AchievementId, TFunction<void(const FGamingServiceResult&)> Callback)
 {
 	Impl->UnlockAchievement(AchievementId, MoveTemp(Callback));
 }
@@ -1307,20 +1315,17 @@ void FSteamworksGamingService::QueryAchievements(TFunction<void(const FAchieveme
 	Impl->QueryAchievements(MoveTemp(Callback));
 }
 
-void FSteamworksGamingService::WriteLeaderboardScore(const FString& LeaderboardId, int32 Score,
-													 TFunction<void(const FGamingServiceResult&)> Callback)
+void FSteamworksGamingService::WriteLeaderboardScore(const FString& LeaderboardId, int32 Score, TFunction<void(const FGamingServiceResult&)> Callback)
 {
 	Impl->WriteLeaderboardScore(LeaderboardId, Score, MoveTemp(Callback));
 }
 
-void FSteamworksGamingService::QueryLeaderboardPage(const FString& LeaderboardId, int32 Limit, int32 ContinuationToken,
-													TFunction<void(const FLeaderboardResult&)> Callback)
+void FSteamworksGamingService::QueryLeaderboardPage(const FString& LeaderboardId, int32 Limit, int32 ContinuationToken, TFunction<void(const FLeaderboardResult&)> Callback)
 {
 	Impl->QueryLeaderboardPage(LeaderboardId, Limit, ContinuationToken, MoveTemp(Callback));
 }
 
-void FSteamworksGamingService::IngestStat(const FString& StatName, int32 Amount,
-										  TFunction<void(const FGamingServiceResult&)> Callback)
+void FSteamworksGamingService::IngestStat(const FString& StatName, int32 Amount, TFunction<void(const FGamingServiceResult&)> Callback)
 {
 	Impl->IngestStat(StatName, Amount, MoveTemp(Callback));
 }
@@ -1330,8 +1335,7 @@ void FSteamworksGamingService::QueryStat(const FString& StatName, TFunction<void
 	Impl->QueryStat(StatName, MoveTemp(Callback));
 }
 
-void FSteamworksGamingService::WriteFile(const FString& FilePath, const TArray<uint8>& Data,
-										 TFunction<void(const FGamingServiceResult&)> Callback)
+void FSteamworksGamingService::WriteFile(const FString& FilePath, const TArray<uint8>& Data, TFunction<void(const FGamingServiceResult&)> Callback)
 {
 	Impl->WriteFile(FilePath, Data, MoveTemp(Callback));
 }
@@ -1341,14 +1345,12 @@ void FSteamworksGamingService::ReadFile(const FString& FilePath, TFunction<void(
 	Impl->ReadFile(FilePath, MoveTemp(Callback));
 }
 
-void FSteamworksGamingService::DeleteFile(const FString& FilePath,
-										  TFunction<void(const FGamingServiceResult&)> Callback)
+void FSteamworksGamingService::DeleteFile(const FString& FilePath, TFunction<void(const FGamingServiceResult&)> Callback)
 {
 	Impl->DeleteFile(FilePath, MoveTemp(Callback));
 }
 
-void FSteamworksGamingService::ListFiles(const FString& DirectoryPath,
-										 TFunction<void(const FFilesListResult&)> Callback)
+void FSteamworksGamingService::ListFiles(const FString& DirectoryPath, TFunction<void(const FFilesListResult&)> Callback)
 {
 	Impl->ListFiles(DirectoryPath, MoveTemp(Callback));
 }
@@ -1369,22 +1371,19 @@ bool FSteamworksGamingService::IsSteamRunning() const { return Impl->IsSteamRunn
 
 bool FSteamworksGamingService::IsSteamOverlayEnabled() const { return Impl->IsSteamOverlayEnabled(); }
 
-void FSteamworksGamingService::CreateSession(const FSessionSettings& Settings,
-                                             TFunction<void(const FSessionCreateResult&)> Callback)
+void FSteamworksGamingService::CreateSession(const FSessionSettings& Settings, TFunction<void(const FSessionCreateResult&)> Callback)
 {
 	Impl->CreateSession(Settings, MoveTemp(Callback));
 }
 
-void FSteamworksGamingService::FindSessions(const FSessionSearchFilter& Filter,
-                                            TFunction<void(const FSessionSearchResult&)> Callback)
+void FSteamworksGamingService::FindSessions(const FSessionSearchFilter& Filter, TFunction<void(const FSessionSearchResult&)> Callback)
 {
 	Impl->FindSessions(Filter, MoveTemp(Callback));
 }
 
-void FSteamworksGamingService::JoinSession(const FString& SessionId,
-                                           TFunction<void(const FSessionJoinResult&)> Callback)
+void FSteamworksGamingService::JoinSession(const FSessionJoinHandle& JoinHandle, TFunction<void(const FSessionJoinResult&)> Callback)
 {
-	Impl->JoinSession(SessionId, MoveTemp(Callback));
+	Impl->JoinSession(JoinHandle, MoveTemp(Callback));
 }
 
 void FSteamworksGamingService::LeaveSession(TFunction<void(const FGamingServiceResult&)> Callback)
@@ -1397,8 +1396,7 @@ void FSteamworksGamingService::DestroySession(TFunction<void(const FGamingServic
 	Impl->DestroySession(MoveTemp(Callback));
 }
 
-void FSteamworksGamingService::UpdateSession(const FSessionSettings& Settings,
-                                             TFunction<void(const FGamingServiceResult&)> Callback)
+void FSteamworksGamingService::UpdateSession(const FSessionSettings& Settings, TFunction<void(const FGamingServiceResult&)> Callback)
 {
 	Impl->UpdateSession(Settings, MoveTemp(Callback));
 }
