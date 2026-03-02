@@ -59,6 +59,34 @@ void UGamingServicesSubsystem::QueryAchievements()
 	});
 }
 
+void UGamingServicesSubsystem::RegisterEntitlement(const FEntitlementDefinition& Definition)
+{
+	EntitlementCatalog.Add(Definition.LogicalName, Definition);
+}
+
+void UGamingServicesSubsystem::ListEntitlements()
+{
+	Service->ListEntitlements([this](const FEntitlementsListResult& R)
+	{
+		OnEntitlementsListed.Broadcast(R);
+	});
+}
+
+void UGamingServicesSubsystem::HasEntitlement(FName LogicalName)
+{
+	const FEntitlementDefinition* Def = EntitlementCatalog.Find(LogicalName);
+	if (!Def)
+	{
+		UE_LOG(LogTemp, Error, TEXT("GamingServices: Entitlement '%s' not registered"), *LogicalName.ToString());
+		OnEntitlementChecked.Broadcast(FHasEntitlementResult(false, LogicalName.ToString(), false));
+		return;
+	}
+	Service->HasEntitlement(*Def, [this](const FHasEntitlementResult& R)
+	{
+		OnEntitlementChecked.Broadcast(R);
+	});
+}
+
 void UGamingServicesSubsystem::WriteLeaderboardScore(const FString& LeaderboardId, int32 Score)
 {
 	Service->WriteLeaderboardScore(LeaderboardId, Score, [this](const FGamingServiceResult& R)

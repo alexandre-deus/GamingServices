@@ -20,6 +20,7 @@
 #include "eos_logging.h"
 #include "eos_playerdatastorage.h"
 #include "eos_sessions.h"
+#include "eos_ecom.h"
 
 template <typename TResult, typename TOwner>
 struct TEOSCallbackContext
@@ -59,6 +60,8 @@ using FSessionCreateCallbackCtx = TEOSCallbackContext<FSessionCreateResult, FEOS
 using FSessionSearchCallbackCtx = TEOSCallbackContext<FSessionSearchResult, FEOSGamingService>;
 using FSessionJoinCallbackCtx = TEOSCallbackContext<FSessionJoinResult, FEOSGamingService>;
 using FSessionUpdateCallbackCtx = TEOSCallbackContext<FGamingServiceResult, FEOSGamingService>;
+using FEntitlementsListCallbackCtx = TEOSCallbackContext<FEntitlementsListResult, FEOSGamingService>;
+using FHasEntitlementCallbackCtx = TEOSCallbackContext<FHasEntitlementResult, FEOSGamingService>;
 
 struct FEOSSessionJoinHandle : public ISessionJoinHandle
 {
@@ -262,6 +265,143 @@ public:
 
 				Result.Achievements = Achievements;
 				FAchievementsQueryCallbackCtx::Complete(LocalCtx, Result);
+			}
+		);
+	}
+
+	void ListEntitlements(TFunction<void(const FEntitlementsListResult&)> Callback)
+	{
+		checkf(bIsInitialized && bIsLoggedIn && EcomHandle,
+		       TEXT("EOSGamingService: ListEntitlements called when service not ready"));
+
+		EOS_Ecom_QueryEntitlementsOptions QueryOptions = {};
+		QueryOptions.ApiVersion = EOS_ECOM_QUERYENTITLEMENTS_API_LATEST;
+		QueryOptions.LocalUserId = EpicAccountIdCached;
+		QueryOptions.EntitlementNameCount = 0;
+		QueryOptions.EntitlementNames = nullptr;
+		QueryOptions.bIncludeRedeemed = EOS_TRUE;
+
+		auto* Ctx = FEntitlementsListCallbackCtx::Create(Owner, MoveTemp(Callback));
+
+		EOS_Ecom_QueryEntitlements(
+			EcomHandle,
+			&QueryOptions,
+			Ctx,
+			[](const EOS_Ecom_QueryEntitlementsCallbackInfo* Data)
+			{
+				check(Data);
+				check(Data->ClientData);
+				auto* LocalCtx = static_cast<FEntitlementsListCallbackCtx*>(Data->ClientData);
+				FEOSGamingService* Service = LocalCtx ? LocalCtx->Service : nullptr;
+				check(Service && Service->Impl);
+
+				FEntitlementsListResult Result;
+				Result.bSuccess = (Data->ResultCode == EOS_EResult::EOS_Success);
+				if (!Result.bSuccess)
+				{
+					UE_LOG(LogTemp, Error, TEXT("EOSGamingService: QueryEntitlements failed: %d"),
+					       (int32)Data->ResultCode);
+					FEntitlementsListCallbackCtx::Complete(LocalCtx, Result);
+					return;
+				}
+
+				EOS_Ecom_GetEntitlementsCountOptions CountOptions = {};
+				CountOptions.ApiVersion = EOS_ECOM_GETENTITLEMENTSCOUNT_API_LATEST;
+				CountOptions.LocalUserId = Service->Impl->EpicAccountIdCached;
+				uint32_t Count = EOS_Ecom_GetEntitlementsCount(Service->Impl->EcomHandle, &CountOptions);
+
+				TArray<FEntitlement> OutEntitlements;
+				for (uint32_t Index = 0; Index < Count; ++Index)
+				{
+					EOS_Ecom_CopyEntitlementByIndexOptions CopyOptions = {};
+					CopyOptions.ApiVersion = EOS_ECOM_COPYENTITLEMENTBYINDEX_API_LATEST;
+					CopyOptions.LocalUserId = Service->Impl->EpicAccountIdCached;
+					CopyOptions.EntitlementIndex = Index;
+
+					EOS_Ecom_Entitlement* Entitlement = nullptr;
+					if (EOS_Ecom_CopyEntitlementByIndex(Service->Impl->EcomHandle, &CopyOptions, &Entitlement) ==
+						EOS_EResult::EOS_Success && Entitlement)
+					{
+						if (Entitlement->bRedeemed == EOS_TRUE)
+						{
+							FEntitlement E;
+							E.Id = UTF8_TO_TCHAR(Entitlement->EntitlementId ? Entitlement->EntitlementId : "");
+							E.DisplayName = UTF8_TO_TCHAR(Entitlement->EntitlementName ? Entitlement->EntitlementName : "");
+							E.Description = TEXT("");
+							OutEntitlements.Add(E);
+						}
+						EOS_Ecom_Entitlement_Release(Entitlement);
+					}
+				}
+
+				Result.Entitlements = OutEntitlements;
+				FEntitlementsListCallbackCtx::Complete(LocalCtx, Result);
+			}
+		);
+	}
+
+	void HasEntitlement(const FEntitlementDefinition& Definition,
+	                    TFunction<void(const FHasEntitlementResult&)> Callback)
+	{
+		checkf(bIsInitialized && bIsLoggedIn && EcomHandle,
+		       TEXT("EOSGamingService: HasEntitlement called when service not ready"));
+
+		std::string EntitlementNameUtf8 = TCHAR_TO_UTF8(*Definition.EOSEntitlementName);
+		const char* EntitlementNames[1];
+		EntitlementNames[0] = EntitlementNameUtf8.c_str();
+
+		EOS_Ecom_QueryEntitlementsOptions QueryOptions = {};
+		QueryOptions.ApiVersion = EOS_ECOM_QUERYENTITLEMENTS_API_LATEST;
+		QueryOptions.LocalUserId = EpicAccountIdCached;
+		QueryOptions.EntitlementNameCount = 1;
+		QueryOptions.EntitlementNames = EntitlementNames;
+		QueryOptions.bIncludeRedeemed = EOS_TRUE;
+
+		struct FHasEntitlementCtx : FHasEntitlementCallbackCtx
+		{
+			FString EntitlementName;
+		};
+
+		auto* Ctx = new FHasEntitlementCtx{};
+		Ctx->Service = Owner;
+		Ctx->Callback = MoveTemp(Callback);
+		Ctx->EntitlementName = Definition.EOSEntitlementName;
+
+		EOS_Ecom_QueryEntitlements(
+			EcomHandle,
+			&QueryOptions,
+			Ctx,
+			[](const EOS_Ecom_QueryEntitlementsCallbackInfo* Data)
+			{
+				check(Data);
+				check(Data->ClientData);
+				auto* LocalCtx = static_cast<FHasEntitlementCtx*>(Data->ClientData);
+				FEOSGamingService* Service = LocalCtx ? LocalCtx->Service : nullptr;
+				check(Service && Service->Impl);
+
+				FHasEntitlementResult Result;
+				Result.EntitlementId = LocalCtx->EntitlementName;
+
+				if (Data->ResultCode != EOS_EResult::EOS_Success)
+				{
+					UE_LOG(LogTemp, Error, TEXT("EOSGamingService: HasEntitlement query failed: %d"),
+					       (int32)Data->ResultCode);
+					Result.bSuccess = false;
+					Result.bHasEntitlement = false;
+					FHasEntitlementCallbackCtx::Complete(LocalCtx, Result);
+					return;
+				}
+
+				EOS_Ecom_GetEntitlementsByNameCountOptions CountOptions = {};
+				CountOptions.ApiVersion = EOS_ECOM_GETENTITLEMENTSBYNAMECOUNT_API_LATEST;
+				CountOptions.LocalUserId = Service->Impl->EpicAccountIdCached;
+				CountOptions.EntitlementName = TCHAR_TO_UTF8(*LocalCtx->EntitlementName);
+
+				uint32_t Count = EOS_Ecom_GetEntitlementsByNameCount(Service->Impl->EcomHandle, &CountOptions);
+				Result.bSuccess = true;
+				Result.bHasEntitlement = (Count > 0);
+
+				FHasEntitlementCallbackCtx::Complete(LocalCtx, Result);
 			}
 		);
 	}
@@ -691,6 +831,7 @@ public:
 				}
 
 				UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Auth login successful"));
+				Service->Impl->EpicAccountIdCached = Data->LocalUserId;
 				Service->Impl->ConnectLogin(Data->LocalUserId, [LocalCtx](const FGamingServiceResult& ConnectResult)
 				{
 					FAuthCallbackCtx::Complete(LocalCtx, ConnectResult);
@@ -1295,6 +1436,7 @@ private:
 	EOS_HConnect ConnectHandle = nullptr;
 	EOS_HPlayerDataStorage PlayerDataStorageHandle = nullptr;
 	EOS_HSessions SessionsHandle = nullptr;
+	EOS_HEcom EcomHandle = nullptr;
 
 	bool bIsInitialized = false;
 	bool bIsConnected = false;
@@ -1462,6 +1604,7 @@ private:
 		ConnectHandle = EOS_Platform_GetConnectInterface(PlatformHandle);
 		PlayerDataStorageHandle = EOS_Platform_GetPlayerDataStorageInterface(PlatformHandle);
 		SessionsHandle = EOS_Platform_GetSessionsInterface(PlatformHandle);
+		EcomHandle = EOS_Platform_GetEcomInterface(PlatformHandle);
 
 		UE_LOG(LogTemp, Log, TEXT("EOSGamingService: EOS platform created successfully"));
 		return true;
@@ -2466,6 +2609,17 @@ void FEOSGamingService::UnlockAchievement(const FString& AchievementId,
 void FEOSGamingService::QueryAchievements(TFunction<void(const FAchievementsQueryResult&)> Callback)
 {
 	Impl->QueryAchievements(MoveTemp(Callback));
+}
+
+void FEOSGamingService::ListEntitlements(TFunction<void(const FEntitlementsListResult&)> Callback)
+{
+	Impl->ListEntitlements(MoveTemp(Callback));
+}
+
+void FEOSGamingService::HasEntitlement(const FEntitlementDefinition& Definition,
+                                       TFunction<void(const FHasEntitlementResult&)> Callback)
+{
+	Impl->HasEntitlement(Definition, MoveTemp(Callback));
 }
 
 void FEOSGamingService::WriteLeaderboardScore(const FString& LeaderboardId, int32 Score,

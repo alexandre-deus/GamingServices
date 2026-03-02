@@ -162,6 +162,67 @@ public:
 		UE_LOG(LogTemp, Log, TEXT("SteamworksGamingService: Queried %d achievements"), Achievements.Num());
 	}
 
+	void ListEntitlements(TFunction<void(const FEntitlementsListResult&)> Callback)
+	{
+		checkf(bIsInitialized && bIsLoggedIn && SteamApps,
+			   TEXT("SteamworksGamingService: ListEntitlements called when service not ready"));
+
+		FFilesListResult Dummy;
+		FEntitlementsListResult Result;
+		Result.bSuccess = true;
+
+		int32 DLCCount = SteamApps->GetDLCCount();
+		for (int32 Index = 0; Index < DLCCount; ++Index)
+		{
+			AppId_t AppId = 0;
+			bool bAvailable = false;
+			char Name[256] = {0};
+
+			if (SteamApps->BGetDLCDataByIndex(Index, &AppId, &bAvailable, Name, sizeof(Name)))
+			{
+				FEntitlement E;
+				E.Id = FString::Printf(TEXT("%u"), (uint32)AppId);
+				E.DisplayName = UTF8_TO_TCHAR(Name);
+				E.Description = TEXT("");
+				Result.Entitlements.Add(E);
+			}
+		}
+
+		if (Callback)
+		{
+			Callback(Result);
+		}
+	}
+
+	void HasEntitlement(const FEntitlementDefinition& Definition,
+	                    TFunction<void(const FHasEntitlementResult&)> Callback)
+	{
+		checkf(bIsInitialized && bIsLoggedIn && SteamApps,
+			   TEXT("SteamworksGamingService: HasEntitlement called when service not ready"));
+
+		AppId_t AppId = (AppId_t)Definition.SteamAppId;
+		FHasEntitlementResult Result;
+		Result.EntitlementId = FString::Printf(TEXT("%u"), (uint32)AppId);
+
+		if (AppId == 0)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("SteamworksGamingService: HasEntitlement called with AppId 0"));
+			Result.bSuccess = false;
+			Result.bHasEntitlement = false;
+		}
+		else
+		{
+			bool bOwned = SteamApps->BIsSubscribedApp(AppId) || SteamApps->BIsDlcInstalled(AppId);
+			Result.bSuccess = true;
+			Result.bHasEntitlement = bOwned;
+		}
+
+		if (Callback)
+		{
+			Callback(Result);
+		}
+	}
+
 	void WriteLeaderboardScore(const FString& LeaderboardId, int32 Score,
 							   TFunction<void(const FGamingServiceResult&)> Callback)
 	{
@@ -1031,6 +1092,7 @@ private:
 	ISteamFriends* SteamFriends = nullptr;
 	ISteamRemoteStorage* SteamRemoteStorage = nullptr;
 	ISteamMatchmaking* SteamMatchmaking = nullptr;
+	ISteamApps* SteamApps = nullptr;
 
 	CSteamID CurrentLobbyId;
 	bool bIsInLobby = false;
@@ -1232,9 +1294,11 @@ private:
 
 	void InitializeSteamworks()
 	{
-		if (!SteamAPI_Init())
+		SteamErrMsg ErrMsg;
+		ESteamAPIInitResult Result = SteamAPI_InitEx(&ErrMsg);
+		if (Result != k_ESteamAPIInitResult_OK)
 		{
-			UE_LOG(LogTemp, Error, TEXT("SteamworksGamingService: Failed to initialize Steamworks API"));
+			UE_LOG(LogTemp, Error, TEXT("SteamworksGamingService: Steam init failed (%d): %hs"), (int32)Result, ErrMsg);
 			return;
 		}
 
@@ -1244,8 +1308,9 @@ private:
 		SteamFriends = ::SteamFriends();
 		SteamRemoteStorage = ::SteamRemoteStorage();
 		SteamMatchmaking = ::SteamMatchmaking();
+		SteamApps = ::SteamApps();
 
-		if (!SteamUserStats || !SteamUser || !SteamUtils || !SteamFriends || !SteamRemoteStorage || !SteamMatchmaking)
+		if (!SteamUserStats || !SteamUser || !SteamUtils || !SteamFriends || !SteamRemoteStorage || !SteamMatchmaking || !SteamApps)
 		{
 			UE_LOG(LogTemp, Error, TEXT("SteamworksGamingService: Failed to get Steam interfaces"));
 			SteamAPI_Shutdown();
@@ -1284,6 +1349,7 @@ private:
 		{
 			FScopeLock Lock(&CallbackCriticalSection);
 			SteamAPI_Shutdown();
+			bIsInitialized = false;
 			UE_LOG(LogTemp, Log, TEXT("SteamworksGamingService: Steamworks shutdown"));
 		}
 	}
@@ -1313,6 +1379,17 @@ void FSteamworksGamingService::UnlockAchievement(const FString& AchievementId, T
 void FSteamworksGamingService::QueryAchievements(TFunction<void(const FAchievementsQueryResult&)> Callback)
 {
 	Impl->QueryAchievements(MoveTemp(Callback));
+}
+
+void FSteamworksGamingService::ListEntitlements(TFunction<void(const FEntitlementsListResult&)> Callback)
+{
+	Impl->ListEntitlements(MoveTemp(Callback));
+}
+
+void FSteamworksGamingService::HasEntitlement(const FEntitlementDefinition& Definition,
+                                              TFunction<void(const FHasEntitlementResult&)> Callback)
+{
+	Impl->HasEntitlement(Definition, MoveTemp(Callback));
 }
 
 void FSteamworksGamingService::WriteLeaderboardScore(const FString& LeaderboardId, int32 Score, TFunction<void(const FGamingServiceResult&)> Callback)

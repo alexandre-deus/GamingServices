@@ -12,6 +12,10 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGamingAchievementUnlocked, const 
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGamingAchievementsQueried, const FAchievementsQueryResult&, Result);
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGamingEntitlementsListed, const FEntitlementsListResult&, Result);
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGamingEntitlementChecked, const FHasEntitlementResult&, Result);
+
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGamingLeaderboardScoreWritten, const FGamingServiceResult&, Result);
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGamingLeaderboardQueried, const FLeaderboardResult&, Result);
@@ -67,6 +71,16 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "GamingServices|Achievements")
 	void QueryAchievements();
+
+	// Entitlements API
+	UFUNCTION(BlueprintCallable, Category = "GamingServices|Entitlements")
+	void RegisterEntitlement(const FEntitlementDefinition& Definition);
+
+	UFUNCTION(BlueprintCallable, Category = "GamingServices|Entitlements")
+	void ListEntitlements();
+
+	UFUNCTION(BlueprintCallable, Category = "GamingServices|Entitlements")
+	void HasEntitlement(FName LogicalName);
 
 	// Leaderboards API
 	UFUNCTION(BlueprintCallable, Category = "GamingServices|Leaderboards")
@@ -150,6 +164,10 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "GamingServices|Events")
 	FOnGamingAchievementsQueried OnAchievementsQueried;
 	UPROPERTY(BlueprintAssignable, Category = "GamingServices|Events")
+	FOnGamingEntitlementsListed OnEntitlementsListed;
+	UPROPERTY(BlueprintAssignable, Category = "GamingServices|Events")
+	FOnGamingEntitlementChecked OnEntitlementChecked;
+	UPROPERTY(BlueprintAssignable, Category = "GamingServices|Events")
 	FOnGamingLeaderboardScoreWritten OnLeaderboardScoreWritten;
 	UPROPERTY(BlueprintAssignable, Category = "GamingServices|Events")
 	FOnGamingLeaderboardQueried OnLeaderboardQueried;
@@ -190,6 +208,7 @@ public:
 
 private:
 	TUniquePtr<FGamingService> Service;
+	TMap<FName, FEntitlementDefinition> EntitlementCatalog;
 
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 	virtual void Deinitialize() override;

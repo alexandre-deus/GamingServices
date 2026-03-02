@@ -60,6 +60,27 @@ void FNullGamingService::QueryAchievements(TFunction<void(const FAchievementsQue
 	Callback(Result);
 }
 
+void FNullGamingService::ListEntitlements(TFunction<void(const FEntitlementsListResult&)> Callback)
+{
+	UE_LOG(LogTemp, Warning, TEXT("NullGamingService: ListEntitlements called - no SDK available"));
+
+	FEntitlementsListResult Result;
+	Result.bSuccess = true;
+
+	Callback(Result);
+}
+
+void FNullGamingService::HasEntitlement(const FEntitlementDefinition& Definition,
+                                        TFunction<void(const FHasEntitlementResult&)> Callback)
+{
+	UE_LOG(LogTemp, Warning, TEXT("NullGamingService: HasEntitlement called for '%s' - no SDK available"),
+	       *Definition.LogicalName.ToString());
+
+	FHasEntitlementResult Result(true, Definition.LogicalName.ToString(), false);
+
+	Callback(Result);
+}
+
 void FNullGamingService::WriteLeaderboardScore(const FString& LeaderboardId, int32 Score,
                                                TFunction<void(const FGamingServiceResult&)> Callback)
 {

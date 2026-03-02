@@ -24,6 +24,10 @@ public:
 	virtual void QueryLeaderboardPage(const FString& LeaderboardId, int32 Limit, int32 ContinuationToken,
 	                                  TFunction<void(const FLeaderboardResult&)> Callback) = 0;
 
+	virtual void ListEntitlements(TFunction<void(const FEntitlementsListResult&)> Callback) = 0;
+	virtual void HasEntitlement(const FEntitlementDefinition& Definition,
+	                            TFunction<void(const FHasEntitlementResult&)> Callback) = 0;
+
 	virtual void IngestStat(const FString& StatName, int32 Amount,
 	                        TFunction<void(const FGamingServiceResult&)> Callback) = 0;
 	virtual void QueryStat(const FString& StatName,
