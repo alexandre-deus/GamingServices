@@ -62,6 +62,15 @@ public:
 	                          TFunction<void(const FGamingServiceResult&)> Callback) = 0;
 	virtual void GetCurrentSession(TFunction<void(const FSessionInfo&)> Callback) = 0;
 
+	virtual void ShowInviteFriendsDialog(TFunction<void(const FGamingServiceResult&)> Callback) = 0;
+
+	virtual FString GetSessionConnectionString() const = 0;
+
+	// Session event callbacks (set by subsystem, fired by implementation)
+	TFunction<void(const FSessionMemberInfo&)> OnSessionUserJoined;
+	TFunction<void(const FSessionMemberInfo&)> OnSessionUserLeft;
+	TFunction<void(const FLobbyInviteAcceptedInfo&)> OnLobbyInviteAccepted;
+
 	virtual void Tick() = 0;
 
 	virtual bool IsInitialized() const = 0;

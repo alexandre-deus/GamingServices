@@ -15,6 +15,21 @@ void UGamingServicesSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	Service = MakeUnique<FNullGamingService>();
 #endif
 	check(Service);
+
+	// Wire up session event callbacks from the service to subsystem delegates
+	Service->OnSessionUserJoined = [this](const FSessionMemberInfo& MemberInfo)
+	{
+		OnSessionUserJoined.Broadcast(MemberInfo);
+	};
+	Service->OnSessionUserLeft = [this](const FSessionMemberInfo& MemberInfo)
+	{
+		OnSessionUserLeft.Broadcast(MemberInfo);
+	};
+	Service->OnLobbyInviteAccepted = [this](const FLobbyInviteAcceptedInfo& InviteInfo)
+	{
+		OnLobbyInviteAccepted.Broadcast(InviteInfo);
+	};
+
 	Super::Initialize(Collection);
 }
 
@@ -260,4 +275,17 @@ void UGamingServicesSubsystem::GetCurrentSessionInfo()
 	{
 		UE_LOG(LogTemp, Log, TEXT("Current Session: %s"), *Info.SessionName);
 	});
+}
+
+void UGamingServicesSubsystem::ShowInviteFriendsDialog()
+{
+	Service->ShowInviteFriendsDialog([this](const FGamingServiceResult& R)
+	{
+		OnInviteFriendsDialogShown.Broadcast(R);
+	});
+}
+
+FString UGamingServicesSubsystem::GetSessionConnectionString() const
+{
+	return Service->GetSessionConnectionString();
 }

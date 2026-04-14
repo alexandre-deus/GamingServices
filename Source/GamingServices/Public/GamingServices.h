@@ -8,4 +8,10 @@ class IGamingService;
 
 class GAMINGSERVICES_API FGamingServicesModule : public IModuleInterface
 {
+public:
+	virtual void StartupModule() override;
+	virtual void ShutdownModule() override;
+
+private:
+	bool bSocketSubsystemEnabled = false;
 };

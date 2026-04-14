@@ -55,6 +55,10 @@ public:
 	                          TFunction<void(const FGamingServiceResult&)> Callback) override;
 	virtual void GetCurrentSession(TFunction<void(const FSessionInfo&)> Callback) override;
 
+	virtual void ShowInviteFriendsDialog(TFunction<void(const FGamingServiceResult&)> Callback) override;
+
+	virtual FString GetSessionConnectionString() const override;
+
 	void SetTempStoragePath(const FString& InPath);
 	const FString& GetTempStoragePath() const;
 

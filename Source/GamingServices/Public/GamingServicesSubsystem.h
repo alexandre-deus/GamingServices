@@ -52,6 +52,14 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGamingSessionDestroyed, const FGa
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGamingSessionUpdated, const FGamingServiceResult&, Result);
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGamingInviteFriendsDialogShown, const FGamingServiceResult&, Result);
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGamingSessionUserJoined, const FSessionMemberInfo&, MemberInfo);
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGamingSessionUserLeft, const FSessionMemberInfo&, MemberInfo);
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGamingLobbyInviteAccepted, const FLobbyInviteAcceptedInfo&, InviteInfo);
+
 UCLASS()
 class GAMINGSERVICES_API UGamingServicesSubsystem : public UGameInstanceSubsystem, public FTickableGameObject
 {
@@ -144,6 +152,12 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "GamingServices|Matchmaking")
 	void GetCurrentSessionInfo();
 
+	UFUNCTION(BlueprintCallable, Category = "GamingServices|Matchmaking")
+	void ShowInviteFriendsDialog();
+
+	UFUNCTION(BlueprintPure, Category = "GamingServices|Matchmaking")
+	FString GetSessionConnectionString() const;
+
 	// Auth/query helpers for Blueprints
 	UFUNCTION(BlueprintPure, Category = "GamingServices")
 	bool IsConnected() const;
@@ -203,6 +217,14 @@ public:
 	FOnGamingSessionDestroyed OnSessionDestroyed;
 	UPROPERTY(BlueprintAssignable, Category = "GamingServices|Events")
 	FOnGamingSessionUpdated OnSessionUpdated;
+	UPROPERTY(BlueprintAssignable, Category = "GamingServices|Events")
+	FOnGamingInviteFriendsDialogShown OnInviteFriendsDialogShown;
+	UPROPERTY(BlueprintAssignable, Category = "GamingServices|Events")
+	FOnGamingSessionUserJoined OnSessionUserJoined;
+	UPROPERTY(BlueprintAssignable, Category = "GamingServices|Events")
+	FOnGamingSessionUserLeft OnSessionUserLeft;
+	UPROPERTY(BlueprintAssignable, Category = "GamingServices|Events")
+	FOnGamingLobbyInviteAccepted OnLobbyInviteAccepted;
 
 	FGamingService& GetService() const { return *Service; }
 

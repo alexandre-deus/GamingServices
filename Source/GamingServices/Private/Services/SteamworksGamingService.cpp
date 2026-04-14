@@ -20,7 +20,9 @@ class FSteamworksGamingService::FSteamworksGamingServiceImpl
 {
 public:
 	explicit FSteamworksGamingServiceImpl(FSteamworksGamingService* InOwner) :
-		Owner(InOwner)
+		Owner(InOwner),
+		m_CallbackLobbyChatUpdate(this, &FSteamworksGamingServiceImpl::OnLobbyChatUpdate),
+		m_CallbackGameLobbyJoinRequested(this, &FSteamworksGamingServiceImpl::OnGameLobbyJoinRequested)
 	{
 	}
 
@@ -677,6 +679,17 @@ public:
 
 	bool IsSteamOverlayEnabled() const { return SteamUtils ? SteamUtils->IsOverlayEnabled() : false; }
 
+	FString GetSessionConnectionString() const
+	{
+		if (!bIsInLobby || !CurrentLobbyId.IsValid() || !SteamMatchmaking)
+		{
+			return FString();
+		}
+
+		CSteamID OwnerID = SteamMatchmaking->GetLobbyOwner(CurrentLobbyId);
+		return FString::Printf(TEXT("steam.%llu"), OwnerID.ConvertToUint64());
+	}
+
 	void CreateSession(const FSessionSettings& Settings, TFunction<void(const FSessionCreateResult&)> Callback)
 	{
 		checkf(bIsInitialized && bIsLoggedIn && SteamMatchmaking,
@@ -712,6 +725,15 @@ public:
 				CurrentLobbyId = CSteamID(Result.m_ulSteamIDLobby);
 				bIsInLobby = true;
 				bIsLobbyHost = true;
+
+				// Snapshot current lobby members
+				CurrentLobbyMembers.Empty();
+				int32 MemberCount = SteamMatchmaking->GetNumLobbyMembers(CurrentLobbyId);
+				for (int32 i = 0; i < MemberCount; ++i)
+				{
+					CSteamID Member = SteamMatchmaking->GetLobbyMemberByIndex(CurrentLobbyId, i);
+					CurrentLobbyMembers.Add(Member.ConvertToUint64());
+				}
 
 				SteamMatchmaking->SetLobbyData(CurrentLobbyId, "name", TCHAR_TO_UTF8(*Settings.SessionName));
 
@@ -883,9 +905,9 @@ public:
 
 		
 		TSharedPtr<FSteamworksSessionJoinHandle> SteamworksHandle = StaticCastSharedPtr<FSteamworksSessionJoinHandle>(JoinHandle.BackendHandle);
-		if (SteamworksHandle->LobbyId.IsValid())
+		if (!SteamworksHandle->LobbyId.IsValid())
 		{
-			UE_LOG(LogTemp, Error, TEXT("SteamworksGamingService: JoinSession called with an invalid LoobbyId."));
+			UE_LOG(LogTemp, Error, TEXT("SteamworksGamingService: JoinSession called with an invalid LobbyId."));
 			FSessionJoinResult FailResult;
 			FailResult.bSuccess = false;
 			Callback(FailResult);
@@ -917,6 +939,15 @@ public:
 				CurrentLobbyId = CSteamID(Result.m_ulSteamIDLobby);
 				bIsInLobby = true;
 				bIsLobbyHost = false;
+
+				// Snapshot current lobby members
+				CurrentLobbyMembers.Empty();
+				int32 MemberCount = SteamMatchmaking->GetNumLobbyMembers(CurrentLobbyId);
+				for (int32 i = 0; i < MemberCount; ++i)
+				{
+					CSteamID Member = SteamMatchmaking->GetLobbyMemberByIndex(CurrentLobbyId, i);
+					CurrentLobbyMembers.Add(Member.ConvertToUint64());
+				}
 				
 				const char* LobbyName = SteamMatchmaking->GetLobbyData(CurrentLobbyId, "name");
 				JoinResult.SessionInfo.SessionName = UTF8_TO_TCHAR(LobbyName);
@@ -965,6 +996,7 @@ public:
 		bIsInLobby = false;
 		bIsLobbyHost = false;
 		CurrentLobbyId = CSteamID();
+		CurrentLobbyMembers.Empty();
 
 		UE_LOG(LogTemp, Log, TEXT("SteamworksGamingService: Successfully left lobby"));
 
@@ -996,6 +1028,7 @@ public:
 		bIsInLobby = false;
 		bIsLobbyHost = false;
 		CurrentLobbyId = CSteamID();
+		CurrentLobbyMembers.Empty();
 
 		UE_LOG(LogTemp, Log, TEXT("SteamworksGamingService: Successfully destroyed lobby"));
 
@@ -1078,6 +1111,33 @@ public:
 		}
 	}
 
+	void ShowInviteFriendsDialog(TFunction<void(const FGamingServiceResult&)> Callback)
+	{
+		checkf(bIsInitialized && bIsLoggedIn && SteamFriends,
+		       TEXT("SteamworksGamingService: ShowInviteFriendsDialog called when service not ready"));
+
+		if (!bIsInLobby || !CurrentLobbyId.IsValid())
+		{
+			UE_LOG(LogTemp, Error, TEXT("SteamworksGamingService: Cannot show invite dialog - not in a lobby"));
+			if (Callback)
+			{
+				Callback(FGamingServiceResult(false));
+			}
+			return;
+		}
+
+		UE_LOG(LogTemp, Log, TEXT("SteamworksGamingService: Opening Steam invite overlay for lobby %llu"), CurrentLobbyId.ConvertToUint64());
+
+		char LobbyIdStr[64];
+		FCStringAnsi::Snprintf(LobbyIdStr, sizeof(LobbyIdStr), "%llu", CurrentLobbyId.ConvertToUint64());
+		SteamFriends->ActivateGameOverlayInviteDialog(CurrentLobbyId);
+
+		if (Callback)
+		{
+			Callback(FGamingServiceResult(true));
+		}
+	}
+
 private:
 	FSteamworksGamingService* Owner;
 
@@ -1097,10 +1157,66 @@ private:
 	CSteamID CurrentLobbyId;
 	bool bIsInLobby = false;
 	bool bIsLobbyHost = false;
+	TSet<uint64> CurrentLobbyMembers;
 
 	TArray<TSharedPtr<FLobbySearchContext>> ActiveSearchContexts;
 
+	// Manual CCallback members for lobby events
+	CCallback<FSteamworksGamingServiceImpl, LobbyChatUpdate_t> m_CallbackLobbyChatUpdate;
+	CCallback<FSteamworksGamingServiceImpl, GameLobbyJoinRequested_t> m_CallbackGameLobbyJoinRequested;
+
 	FCriticalSection CallbackCriticalSection;
+
+	void OnLobbyChatUpdate(LobbyChatUpdate_t* pParam)
+	{
+		if (!bIsInLobby || pParam->m_ulSteamIDLobby != CurrentLobbyId.ConvertToUint64())
+		{
+			return;
+		}
+
+		CSteamID ChangedUser(pParam->m_ulSteamIDUserChanged);
+		FString ChangedUserId = FString::Printf(TEXT("%llu"), ChangedUser.ConvertToUint64());
+		FString ChangedDisplayName = SteamFriends ? UTF8_TO_TCHAR(SteamFriends->GetFriendPersonaName(ChangedUser)) : TEXT("Unknown");
+
+		if (pParam->m_rgfChatMemberStateChange & k_EChatMemberStateChangeEntered)
+		{
+			CurrentLobbyMembers.Add(ChangedUser.ConvertToUint64());
+			UE_LOG(LogTemp, Log, TEXT("SteamworksGamingService: User joined lobby: %s (%s)"), *ChangedDisplayName, *ChangedUserId);
+			if (Owner->OnSessionUserJoined)
+			{
+				Owner->OnSessionUserJoined(FSessionMemberInfo(ChangedUserId, ChangedDisplayName));
+			}
+		}
+
+		if (pParam->m_rgfChatMemberStateChange & (k_EChatMemberStateChangeLeft | k_EChatMemberStateChangeDisconnected | k_EChatMemberStateChangeKicked | k_EChatMemberStateChangeBanned))
+		{
+			CurrentLobbyMembers.Remove(ChangedUser.ConvertToUint64());
+			UE_LOG(LogTemp, Log, TEXT("SteamworksGamingService: User left lobby: %s (%s)"), *ChangedDisplayName, *ChangedUserId);
+			if (Owner->OnSessionUserLeft)
+			{
+				Owner->OnSessionUserLeft(FSessionMemberInfo(ChangedUserId, ChangedDisplayName));
+			}
+		}
+	}
+
+	void OnGameLobbyJoinRequested(GameLobbyJoinRequested_t* pParam)
+	{
+		UE_LOG(LogTemp, Log, TEXT("SteamworksGamingService: Lobby invite accepted for lobby %llu"), pParam->m_steamIDLobby.ConvertToUint64());
+
+		CSteamID FriendId = pParam->m_steamIDFriend;
+		FString FriendUserId = FString::Printf(TEXT("%llu"), FriendId.ConvertToUint64());
+		FString FriendDisplayName = SteamFriends ? UTF8_TO_TCHAR(SteamFriends->GetFriendPersonaName(FriendId)) : TEXT("Unknown");
+
+		FLobbyInviteAcceptedInfo Info;
+		Info.InviterUserId = FriendUserId;
+		Info.InviterDisplayName = FriendDisplayName;
+		Info.JoinHandle.BackendHandle = MakeShared<FSteamworksSessionJoinHandle>(pParam->m_steamIDLobby);
+
+		if (Owner->OnLobbyInviteAccepted)
+		{
+			Owner->OnLobbyInviteAccepted(Info);
+		}
+	}
 
 	struct FCallResultManager
 	{
@@ -1481,6 +1597,16 @@ void FSteamworksGamingService::UpdateSession(const FSessionSettings& Settings, T
 void FSteamworksGamingService::GetCurrentSession(TFunction<void(const FSessionInfo&)> Callback)
 {
 	Impl->GetCurrentSession(MoveTemp(Callback));
+}
+
+void FSteamworksGamingService::ShowInviteFriendsDialog(TFunction<void(const FGamingServiceResult&)> Callback)
+{
+	Impl->ShowInviteFriendsDialog(MoveTemp(Callback));
+}
+
+FString FSteamworksGamingService::GetSessionConnectionString() const
+{
+	return Impl->GetSessionConnectionString();
 }
 
 #endif

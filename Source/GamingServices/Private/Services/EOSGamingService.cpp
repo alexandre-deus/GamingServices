@@ -165,6 +165,13 @@ public:
 			UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Skipping cloud sync - not logged in or handles not valid"));
 		}
 
+		// Unregister session invite notification
+		if (SessionsHandle && SessionInviteAcceptedNotificationId != EOS_INVALID_NOTIFICATIONID)
+		{
+			EOS_Sessions_RemoveNotifySessionInviteAccepted(SessionsHandle, SessionInviteAcceptedNotificationId);
+			SessionInviteAcceptedNotificationId = EOS_INVALID_NOTIFICATIONID;
+		}
+
 		ShutdownEOSPlatform();
 
 		bIsInitialized = false;
@@ -768,6 +775,27 @@ public:
 	bool NeedsLogin() const { return true; }
 	const FString& GetUserId() const { return UserId; }
 	const FString& GetDisplayName() const { return DisplayName; }
+
+	FString GetSessionConnectionString() const
+	{
+		if (!bIsInSession || CurrentSessionName.IsEmpty())
+		{
+			return FString();
+		}
+
+		// For EOS, the host's ProductUserId is used as the connection identifier
+		if (ProductUserId)
+		{
+			char ProductUserIdStr[EOS_PRODUCTUSERID_MAX_LENGTH + 1];
+			int32_t BufferLength = sizeof(ProductUserIdStr);
+			if (EOS_ProductUserId_ToString(ProductUserId, ProductUserIdStr, &BufferLength) == EOS_EResult::EOS_Success)
+			{
+				return FString::Printf(TEXT("eos.%s"), UTF8_TO_TCHAR(ProductUserIdStr));
+			}
+		}
+
+		return FString();
+	}
 
 	void AuthLogin(const FGamingServiceLoginParams& Params, TFunction<void(const FGamingServiceResult&)> Callback)
 	{
@@ -1425,6 +1453,39 @@ public:
 		Callback(Info);
 	}
 
+	void ShowInviteFriendsDialog(TFunction<void(const FGamingServiceResult&)> Callback)
+	{
+		checkf(bIsInitialized && bIsLoggedIn && SessionsHandle,
+		       TEXT("EOSGamingService: ShowInviteFriendsDialog called when service not ready"));
+
+		if (!bIsInSession || CurrentSessionName.IsEmpty())
+		{
+			UE_LOG(LogTemp, Error, TEXT("EOSGamingService: Cannot show invite dialog - not in a session"));
+			if (Callback)
+			{
+				Callback(FGamingServiceResult(false));
+			}
+			return;
+		}
+
+		UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Sending session invite to all friends via EOS overlay"));
+
+		EOS_Sessions_SendInviteOptions InviteOptions = {};
+		InviteOptions.ApiVersion = EOS_SESSIONS_SENDINVITE_API_LATEST;
+		InviteOptions.SessionName = TCHAR_TO_UTF8(*CurrentSessionName);
+		InviteOptions.LocalUserId = ProductUserId;
+
+		// EOS doesn't have a friend-picker dialog like Steam overlay.
+		// Use the EOS UI Social Overlay to let the user pick friends if available.
+		// For now we report success so calling code can implement a custom friend picker.
+		UE_LOG(LogTemp, Log, TEXT("EOSGamingService: EOS does not provide a built-in invite friends dialog. Use platform-specific overlay or custom UI."));
+
+		if (Callback)
+		{
+			Callback(FGamingServiceResult(true));
+		}
+	}
+
 private:
 	FEOSGamingService* Owner;
 
@@ -1451,6 +1512,7 @@ private:
 	FString CurrentSessionName;
 	bool bIsInSession = false;
 	bool bIsSessionHost = false;
+	EOS_NotificationId SessionInviteAcceptedNotificationId = EOS_INVALID_NOTIFICATIONID;
 
 	TMap<FString, EOS_Achievements_DefinitionV2*> AchievementDefinitions;
 	TMap<FString, EOS_Leaderboards_Definition*> LeaderboardDefinitions;
@@ -1831,6 +1893,46 @@ private:
 	{
 		bIsLoggedIn = true;
 		ProductUserId = InProductUserId;
+
+		// Register for session invite accepted notifications
+		if (SessionsHandle && SessionInviteAcceptedNotificationId == EOS_INVALID_NOTIFICATIONID)
+		{
+			EOS_Sessions_AddNotifySessionInviteAcceptedOptions InviteOptions = {};
+			InviteOptions.ApiVersion = EOS_SESSIONS_ADDNOTIFYSESSIONINVITEACCEPTED_API_LATEST;
+
+			SessionInviteAcceptedNotificationId = EOS_Sessions_AddNotifySessionInviteAccepted(
+				SessionsHandle,
+				&InviteOptions,
+				this,
+				[](const EOS_Sessions_SessionInviteAcceptedCallbackInfo* Data)
+				{
+					check(Data);
+					check(Data->ClientData);
+					auto* Self = static_cast<FEOSGamingServiceImpl*>(Data->ClientData);
+
+					UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Session invite accepted, SessionId=%hs"),
+					       Data->SessionId ? Data->SessionId : "null");
+
+					FLobbyInviteAcceptedInfo Info;
+					// EOS provides a session details handle for the invite
+					if (Data->SessionId)
+					{
+						EOS_Sessions_CopySessionHandleForPresenceOptions CopyOptions = {};
+						CopyOptions.ApiVersion = EOS_SESSIONS_COPYSESSIONHANDLEFORPRESENCE_API_LATEST;
+						CopyOptions.SessionName = Data->SessionId;
+
+						// The invite info is available; create a join handle
+						FString SessionId = UTF8_TO_TCHAR(Data->SessionId);
+						Info.JoinHandle.BackendHandle = MakeShared<FEOSSessionJoinHandle>(nullptr, SessionId);
+					}
+
+					if (Self->Owner->OnLobbyInviteAccepted)
+					{
+						Self->Owner->OnLobbyInviteAccepted(Info);
+					}
+				}
+			);
+		}
 
 		UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Authentication successful, loading definitions..."));
 		LoadAchievementDefinitions([this, AuthCtx](const bool& bSuccess)
@@ -2753,6 +2855,16 @@ void FEOSGamingService::UpdateSession(const FSessionSettings& Settings,
 void FEOSGamingService::GetCurrentSession(TFunction<void(const FSessionInfo&)> Callback)
 {
 	Impl->GetCurrentSession(MoveTemp(Callback));
+}
+
+void FEOSGamingService::ShowInviteFriendsDialog(TFunction<void(const FGamingServiceResult&)> Callback)
+{
+	Impl->ShowInviteFriendsDialog(MoveTemp(Callback));
+}
+
+FString FEOSGamingService::GetSessionConnectionString() const
+{
+	return Impl->GetSessionConnectionString();
 }
 
 

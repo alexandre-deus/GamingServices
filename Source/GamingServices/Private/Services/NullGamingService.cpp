@@ -240,6 +240,22 @@ void FNullGamingService::GetCurrentSession(TFunction<void(const FSessionInfo&)> 
 	Callback(Info);
 }
 
+void FNullGamingService::ShowInviteFriendsDialog(TFunction<void(const FGamingServiceResult&)> Callback)
+{
+	UE_LOG(LogTemp, Warning, TEXT("NullGamingService: ShowInviteFriendsDialog called - no SDK available"));
+
+	FGamingServiceResult Result;
+	Result.bSuccess = true;
+
+	Callback(Result);
+}
+
+FString FNullGamingService::GetSessionConnectionString() const
+{
+	UE_LOG(LogTemp, Warning, TEXT("NullGamingService: GetSessionConnectionString called - no SDK available"));
+	return FString();
+}
+
 void FNullGamingService::Tick()
 {
 }

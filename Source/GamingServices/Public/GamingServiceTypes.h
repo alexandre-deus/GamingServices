@@ -551,3 +551,43 @@ struct GAMINGSERVICES_API FSessionJoinResult : public FGamingServiceResult
 	{
 	}
 };
+
+// ============================================================================
+// Session Events (host-side notifications)
+// ============================================================================
+
+USTRUCT(BlueprintType)
+struct GAMINGSERVICES_API FSessionMemberInfo
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly)
+	FString UserId;
+
+	UPROPERTY(BlueprintReadOnly)
+	FString DisplayName;
+
+	FSessionMemberInfo() = default;
+
+	FSessionMemberInfo(const FString& InUserId, const FString& InDisplayName)
+		: UserId(InUserId), DisplayName(InDisplayName)
+	{
+	}
+};
+
+USTRUCT(BlueprintType)
+struct GAMINGSERVICES_API FLobbyInviteAcceptedInfo
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly)
+	FString InviterUserId;
+
+	UPROPERTY(BlueprintReadOnly)
+	FString InviterDisplayName;
+
+	UPROPERTY(BlueprintReadOnly)
+	FSessionJoinHandle JoinHandle;
+
+	FLobbyInviteAcceptedInfo() = default;
+};

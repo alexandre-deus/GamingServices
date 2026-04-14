@@ -53,6 +53,10 @@ public:
 	                          TFunction<void(const FGamingServiceResult&)> Callback) override;
 	virtual void GetCurrentSession(TFunction<void(const FSessionInfo&)> Callback) override;
 
+	virtual void ShowInviteFriendsDialog(TFunction<void(const FGamingServiceResult&)> Callback) override;
+
+	virtual FString GetSessionConnectionString() const override;
+
 	virtual void Tick() override;
 
 	virtual bool IsInitialized() const override;
