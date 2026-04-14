@@ -1,15 +1,14 @@
-
 #pragma once
 
 #include "CoreMinimal.h"
-#include "FGamingService.h"
+#include "Services/FGamingService.h"
 #include "GamingServiceTypes.h"
 
-class GAMINGSERVICES_API FEOSGamingService : public FGamingService
+class GAMINGSERVICES_API FNullGamingService : public FGamingService
 {
 public:
-	FEOSGamingService();
-	virtual ~FEOSGamingService() override;
+	FNullGamingService();
+	virtual ~FNullGamingService() override;
 
 	virtual bool Connect(const FGamingServiceConnectParams& Params) override;
 	virtual void Shutdown() override;
@@ -55,9 +54,6 @@ public:
 	                          TFunction<void(const FGamingServiceResult&)> Callback) override;
 	virtual void GetCurrentSession(TFunction<void(const FSessionInfo&)> Callback) override;
 
-	void SetTempStoragePath(const FString& InPath);
-	const FString& GetTempStoragePath() const;
-
 	virtual void Tick() override;
 
 	virtual bool IsInitialized() const override;
@@ -67,6 +63,6 @@ public:
 	virtual FString GetDisplayName() const override;
 
 private:
-	class FEOSGamingServiceImpl;
-	TUniquePtr<FEOSGamingServiceImpl> Impl;
+	bool bInitialized;
+	bool bLoggedIn;
 };

@@ -1,6 +1,6 @@
 #ifdef USE_EOS
 
-#include "EOSGamingService.h"
+#include "Services/EOSGamingService.h"
 #include "Engine/World.h"
 #include "HAL/PlatformFilemanager.h"
 #include "Misc/Paths.h"

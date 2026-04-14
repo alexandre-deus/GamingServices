@@ -1,9 +1,9 @@
 #include "GamingServicesSubsystem.h"
 #include "Misc/ConfigCacheIni.h"
 #include "GamingServiceTypes.h"
-#include "EOSGamingService.h"
-#include "SteamworksGamingService.h"
-#include "NullGamingService.h"
+#include "Services/EOSGamingService.h"
+#include "Services/SteamworksGamingService.h"
+#include "Services/NullGamingService.h"
 
 void UGamingServicesSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {

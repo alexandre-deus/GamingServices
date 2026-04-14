@@ -202,6 +202,8 @@ public class GamingServices : ModuleRules
             "Projects",
             "Json",
             "JsonUtilities",
+            "NetCore",
+            "Sockets",
         });
 
         const EServiceBackends backend = EServiceBackends.Steamworks;

@@ -1,4 +1,4 @@
-#include "FGamingService.h"
+#include "Services/FGamingService.h"
 #include "Misc/FileHelper.h"
 
 bool FGamingService::ParseSettingsFromBuffer(const TArray<uint8>& Buffer, TMap<FString, FString>& OutSettings)

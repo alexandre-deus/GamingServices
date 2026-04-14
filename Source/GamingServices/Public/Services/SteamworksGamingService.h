@@ -1,14 +1,14 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "FGamingService.h"
+#include "Services/FGamingService.h"
 #include "GamingServiceTypes.h"
 
-class GAMINGSERVICES_API FNullGamingService : public FGamingService
+class GAMINGSERVICES_API FSteamworksGamingService : public FGamingService
 {
 public:
-	FNullGamingService();
-	virtual ~FNullGamingService() override;
+	FSteamworksGamingService();
+	virtual ~FSteamworksGamingService() override;
 
 	virtual bool Connect(const FGamingServiceConnectParams& Params) override;
 	virtual void Shutdown() override;
@@ -27,7 +27,6 @@ public:
 	virtual void ListEntitlements(TFunction<void(const FEntitlementsListResult&)> Callback) override;
 	virtual void HasEntitlement(const FEntitlementDefinition& Definition,
 	                            TFunction<void(const FHasEntitlementResult&)> Callback) override;
-
 	virtual void IngestStat(const FString& StatName, int32 Amount,
 	                        TFunction<void(const FGamingServiceResult&)> Callback) override;
 	virtual void QueryStat(const FString& StatName,
@@ -62,7 +61,10 @@ public:
 	virtual FString GetUserId() const override;
 	virtual FString GetDisplayName() const override;
 
+	bool IsSteamRunning() const;
+	bool IsSteamOverlayEnabled() const;
+
 private:
-	bool bInitialized;
-	bool bLoggedIn;
+	class FSteamworksGamingServiceImpl;
+	TUniquePtr<FSteamworksGamingServiceImpl> Impl;
 };

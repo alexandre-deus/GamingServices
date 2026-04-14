@@ -1,14 +1,15 @@
+
 #pragma once
 
 #include "CoreMinimal.h"
-#include "FGamingService.h"
+#include "Services/FGamingService.h"
 #include "GamingServiceTypes.h"
 
-class GAMINGSERVICES_API FSteamworksGamingService : public FGamingService
+class GAMINGSERVICES_API FEOSGamingService : public FGamingService
 {
 public:
-	FSteamworksGamingService();
-	virtual ~FSteamworksGamingService() override;
+	FEOSGamingService();
+	virtual ~FEOSGamingService() override;
 
 	virtual bool Connect(const FGamingServiceConnectParams& Params) override;
 	virtual void Shutdown() override;
@@ -27,6 +28,7 @@ public:
 	virtual void ListEntitlements(TFunction<void(const FEntitlementsListResult&)> Callback) override;
 	virtual void HasEntitlement(const FEntitlementDefinition& Definition,
 	                            TFunction<void(const FHasEntitlementResult&)> Callback) override;
+
 	virtual void IngestStat(const FString& StatName, int32 Amount,
 	                        TFunction<void(const FGamingServiceResult&)> Callback) override;
 	virtual void QueryStat(const FString& StatName,
@@ -53,6 +55,9 @@ public:
 	                          TFunction<void(const FGamingServiceResult&)> Callback) override;
 	virtual void GetCurrentSession(TFunction<void(const FSessionInfo&)> Callback) override;
 
+	void SetTempStoragePath(const FString& InPath);
+	const FString& GetTempStoragePath() const;
+
 	virtual void Tick() override;
 
 	virtual bool IsInitialized() const override;
@@ -61,10 +66,7 @@ public:
 	virtual FString GetUserId() const override;
 	virtual FString GetDisplayName() const override;
 
-	bool IsSteamRunning() const;
-	bool IsSteamOverlayEnabled() const;
-
 private:
-	class FSteamworksGamingServiceImpl;
-	TUniquePtr<FSteamworksGamingServiceImpl> Impl;
+	class FEOSGamingServiceImpl;
+	TUniquePtr<FEOSGamingServiceImpl> Impl;
 };

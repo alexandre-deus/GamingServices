@@ -1,6 +1,6 @@
 #ifdef USE_STEAMWORKS
 
-#include "SteamworksGamingService.h"
+#include "Services/SteamworksGamingService.h"
 #include "Engine/World.h"
 #include "HAL/CriticalSection.h"
 #include "Misc/FileHelper.h"

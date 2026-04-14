@@ -3,7 +3,7 @@
 #include "CoreMinimal.h"
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "GamingServiceTypes.h"
-#include "FGamingService.h"
+#include "Services/FGamingService.h"
 #include "GamingServicesSubsystem.generated.h"
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGamingLoggedIn, const FGamingServiceResult&, Result);
