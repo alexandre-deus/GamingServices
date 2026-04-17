@@ -269,6 +269,22 @@ void UGamingServicesSubsystem::UpdateSession(const FSessionSettings& Settings)
 	});
 }
 
+void UGamingServicesSubsystem::LockLobby()
+{
+	Service->LockLobby([this](const FGamingServiceResult& R)
+	{
+		OnLobbyLocked.Broadcast(R);
+	});
+}
+
+void UGamingServicesSubsystem::UnlockLobby()
+{
+	Service->UnlockLobby([this](const FGamingServiceResult& R)
+	{
+		OnLobbyUnlocked.Broadcast(R);
+	});
+}
+
 void UGamingServicesSubsystem::GetCurrentSessionInfo()
 {
 	Service->GetCurrentSession([this](const FSessionInfo& Info)

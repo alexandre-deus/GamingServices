@@ -53,6 +53,8 @@ public:
 	virtual void DestroySession(TFunction<void(const FGamingServiceResult&)> Callback) override;
 	virtual void UpdateSession(const FSessionSettings& Settings,
 	                          TFunction<void(const FGamingServiceResult&)> Callback) override;
+	virtual void LockLobby(TFunction<void(const FGamingServiceResult&)> Callback) override;
+	virtual void UnlockLobby(TFunction<void(const FGamingServiceResult&)> Callback) override;
 	virtual void GetCurrentSession(TFunction<void(const FSessionInfo&)> Callback) override;
 
 	virtual void ShowInviteFriendsDialog(TFunction<void(const FGamingServiceResult&)> Callback) override;

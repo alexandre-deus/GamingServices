@@ -231,6 +231,26 @@ void FNullGamingService::UpdateSession(const FSessionSettings& Settings,
 	Callback(Result);
 }
 
+void FNullGamingService::LockLobby(TFunction<void(const FGamingServiceResult&)> Callback)
+{
+	UE_LOG(LogTemp, Warning, TEXT("NullGamingService: LockLobby called - no SDK available"));
+
+	FGamingServiceResult Result;
+	Result.bSuccess = true;
+
+	Callback(Result);
+}
+
+void FNullGamingService::UnlockLobby(TFunction<void(const FGamingServiceResult&)> Callback)
+{
+	UE_LOG(LogTemp, Warning, TEXT("NullGamingService: UnlockLobby called - no SDK available"));
+
+	FGamingServiceResult Result;
+	Result.bSuccess = true;
+
+	Callback(Result);
+}
+
 void FNullGamingService::GetCurrentSession(TFunction<void(const FSessionInfo&)> Callback)
 {
 	UE_LOG(LogTemp, Warning, TEXT("NullGamingService: GetCurrentSession called - no SDK available"));

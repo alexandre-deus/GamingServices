@@ -1087,6 +1087,68 @@ public:
 		}
 	}
 
+	void LockLobby(TFunction<void(const FGamingServiceResult&)> Callback)
+	{
+		checkf(bIsInitialized && bIsLoggedIn && SteamMatchmaking,
+		       TEXT("SteamworksGamingService: LockLobby called when service not ready"));
+
+		if (!bIsInLobby || !bIsLobbyHost)
+		{
+			UE_LOG(LogTemp, Error, TEXT("SteamworksGamingService: Cannot lock lobby - not hosting a lobby"));
+			if (Callback)
+			{
+				Callback(FGamingServiceResult(false));
+			}
+			return;
+		}
+
+		const bool bSuccess = SteamMatchmaking->SetLobbyJoinable(CurrentLobbyId, false);
+		if (bSuccess)
+		{
+			UE_LOG(LogTemp, Log, TEXT("SteamworksGamingService: Lobby locked successfully"));
+		}
+		else
+		{
+			UE_LOG(LogTemp, Error, TEXT("SteamworksGamingService: Failed to lock lobby"));
+		}
+
+		if (Callback)
+		{
+			Callback(FGamingServiceResult(bSuccess));
+		}
+	}
+
+	void UnlockLobby(TFunction<void(const FGamingServiceResult&)> Callback)
+	{
+		checkf(bIsInitialized && bIsLoggedIn && SteamMatchmaking,
+		       TEXT("SteamworksGamingService: UnlockLobby called when service not ready"));
+
+		if (!bIsInLobby || !bIsLobbyHost)
+		{
+			UE_LOG(LogTemp, Error, TEXT("SteamworksGamingService: Cannot unlock lobby - not hosting a lobby"));
+			if (Callback)
+			{
+				Callback(FGamingServiceResult(false));
+			}
+			return;
+		}
+
+		const bool bSuccess = SteamMatchmaking->SetLobbyJoinable(CurrentLobbyId, true);
+		if (bSuccess)
+		{
+			UE_LOG(LogTemp, Log, TEXT("SteamworksGamingService: Lobby unlocked successfully"));
+		}
+		else
+		{
+			UE_LOG(LogTemp, Error, TEXT("SteamworksGamingService: Failed to unlock lobby"));
+		}
+
+		if (Callback)
+		{
+			Callback(FGamingServiceResult(bSuccess));
+		}
+	}
+
 	void GetCurrentSession(TFunction<void(const FSessionInfo&)> Callback)
 	{
 		FSessionInfo Info;
@@ -1592,6 +1654,16 @@ void FSteamworksGamingService::DestroySession(TFunction<void(const FGamingServic
 void FSteamworksGamingService::UpdateSession(const FSessionSettings& Settings, TFunction<void(const FGamingServiceResult&)> Callback)
 {
 	Impl->UpdateSession(Settings, MoveTemp(Callback));
+}
+
+void FSteamworksGamingService::LockLobby(TFunction<void(const FGamingServiceResult&)> Callback)
+{
+	Impl->LockLobby(MoveTemp(Callback));
+}
+
+void FSteamworksGamingService::UnlockLobby(TFunction<void(const FGamingServiceResult&)> Callback)
+{
+	Impl->UnlockLobby(MoveTemp(Callback));
 }
 
 void FSteamworksGamingService::GetCurrentSession(TFunction<void(const FSessionInfo&)> Callback)

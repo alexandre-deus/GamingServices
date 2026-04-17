@@ -52,6 +52,10 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGamingSessionDestroyed, const FGa
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGamingSessionUpdated, const FGamingServiceResult&, Result);
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGamingLobbyLocked, const FGamingServiceResult&, Result);
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGamingLobbyUnlocked, const FGamingServiceResult&, Result);
+
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGamingInviteFriendsDialogShown, const FGamingServiceResult&, Result);
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGamingSessionUserJoined, const FSessionMemberInfo&, MemberInfo);
@@ -150,6 +154,12 @@ public:
 	void UpdateSession(const FSessionSettings& Settings);
 
 	UFUNCTION(BlueprintCallable, Category = "GamingServices|Matchmaking")
+	void LockLobby();
+
+	UFUNCTION(BlueprintCallable, Category = "GamingServices|Matchmaking")
+	void UnlockLobby();
+
+	UFUNCTION(BlueprintCallable, Category = "GamingServices|Matchmaking")
 	void GetCurrentSessionInfo();
 
 	UFUNCTION(BlueprintCallable, Category = "GamingServices|Matchmaking")
@@ -217,6 +227,10 @@ public:
 	FOnGamingSessionDestroyed OnSessionDestroyed;
 	UPROPERTY(BlueprintAssignable, Category = "GamingServices|Events")
 	FOnGamingSessionUpdated OnSessionUpdated;
+	UPROPERTY(BlueprintAssignable, Category = "GamingServices|Events")
+	FOnGamingLobbyLocked OnLobbyLocked;
+	UPROPERTY(BlueprintAssignable, Category = "GamingServices|Events")
+	FOnGamingLobbyUnlocked OnLobbyUnlocked;
 	UPROPERTY(BlueprintAssignable, Category = "GamingServices|Events")
 	FOnGamingInviteFriendsDialogShown OnInviteFriendsDialogShown;
 	UPROPERTY(BlueprintAssignable, Category = "GamingServices|Events")

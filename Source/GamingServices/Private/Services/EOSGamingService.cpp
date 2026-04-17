@@ -1038,6 +1038,8 @@ public:
 				{
 					Service->Impl->bIsInSession = true;
 					Service->Impl->bIsSessionHost = true;
+					Service->Impl->CurrentSessionName = LocalCtx->Settings.SessionName;
+					Service->Impl->CurrentSessionSettings = LocalCtx->Settings;
 					
 					Result.SessionInfo.SessionName = LocalCtx->Settings.SessionName;
 					Result.SessionInfo.HostUserId = Service->Impl->UserId;
@@ -1247,6 +1249,7 @@ public:
 				{
 					Service->Impl->bIsInSession = true;
 					Service->Impl->bIsSessionHost = false;
+					Service->Impl->CurrentSessionName = LocalPayload->JoinHandle->SessionName;
 					UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Successfully joined session"));
 				}
 				else
@@ -1308,6 +1311,7 @@ public:
 				{
 					Service->Impl->bIsInSession = false;
 					Service->Impl->CurrentSessionName.Empty();
+					Service->Impl->CurrentSessionSettings = FSessionSettings();
 					UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Successfully left session"));
 				}
 				else
@@ -1359,6 +1363,7 @@ public:
 					Service->Impl->bIsInSession = false;
 					Service->Impl->bIsSessionHost = false;
 					Service->Impl->CurrentSessionName.Empty();
+					Service->Impl->CurrentSessionSettings = FSessionSettings();
 					UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Successfully destroyed session"));
 				}
 				else
@@ -1384,55 +1389,139 @@ public:
 		}
 
 		UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Updating session"));
+		ApplySessionSettings(Settings, TEXT("update"), TEXT("EOSGamingService: Session updated successfully"), MoveTemp(Callback));
+	}
 
+	void LockLobby(TFunction<void(const FGamingServiceResult&)> Callback)
+	{
+		checkf(bIsInitialized && bIsLoggedIn && SessionsHandle,
+		       TEXT("EOSGamingService: LockLobby called when service not ready"));
+
+		if (!bIsInSession || !bIsSessionHost || CurrentSessionName.IsEmpty())
+		{
+			UE_LOG(LogTemp, Error, TEXT("EOSGamingService: Cannot lock lobby - not hosting a session"));
+			if (Callback)
+			{
+				Callback(FGamingServiceResult(false));
+			}
+			return;
+		}
+
+		UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Locking session"));
+
+		FSessionSettings LockedSettings = CurrentSessionSettings;
+		LockedSettings.Privacy = ESessionPrivacy::Private;
+		LockedSettings.bAllowInvites = false;
+		LockedSettings.bAllowJoinInProgress = false;
+
+		ApplySessionSettings(LockedSettings, TEXT("lock"), TEXT("EOSGamingService: Session locked successfully"), MoveTemp(Callback));
+	}
+
+	void UnlockLobby(TFunction<void(const FGamingServiceResult&)> Callback)
+	{
+		checkf(bIsInitialized && bIsLoggedIn && SessionsHandle,
+		       TEXT("EOSGamingService: UnlockLobby called when service not ready"));
+
+		if (!bIsInSession || !bIsSessionHost || CurrentSessionName.IsEmpty())
+		{
+			UE_LOG(LogTemp, Error, TEXT("EOSGamingService: Cannot unlock lobby - not hosting a session"));
+			if (Callback)
+			{
+				Callback(FGamingServiceResult(false));
+			}
+			return;
+		}
+
+		UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Unlocking session"));
+
+		FSessionSettings UnlockedSettings = CurrentSessionSettings;
+		UnlockedSettings.Privacy = ESessionPrivacy::Public;
+		UnlockedSettings.bAllowInvites = true;
+		UnlockedSettings.bAllowJoinInProgress = true;
+
+		ApplySessionSettings(UnlockedSettings, TEXT("unlock"), TEXT("EOSGamingService: Session unlocked successfully"), MoveTemp(Callback));
+	}
+
+	void ApplySessionSettings(const FSessionSettings& Settings, const TCHAR* OperationName, const TCHAR* SuccessMessage,
+		TFunction<void(const FGamingServiceResult&)> Callback)
+	{
 		EOS_Sessions_CreateSessionModificationOptions CreateOptions = {};
 		CreateOptions.ApiVersion = EOS_SESSIONS_CREATESESSIONMODIFICATION_API_LATEST;
 		CreateOptions.SessionName = TCHAR_TO_UTF8(*CurrentSessionName);
 		CreateOptions.BucketId = TCHAR_TO_UTF8(TEXT("GameSessions"));
 		CreateOptions.MaxPlayers = Settings.MaxPlayers;
+		CreateOptions.LocalUserId = ProductUserId;
 
 		EOS_HSessionModification SessionModHandle = nullptr;
 		EOS_EResult CreateModResult = EOS_Sessions_CreateSessionModification(SessionsHandle, &CreateOptions, &SessionModHandle);
 		
 		if (CreateModResult != EOS_EResult::EOS_Success)
 		{
-			UE_LOG(LogTemp, Error, TEXT("EOSGamingService: Failed to create session modification for update: %d"), (int32)CreateModResult);
+			UE_LOG(LogTemp, Error, TEXT("EOSGamingService: Failed to create session modification for %s: %d"), OperationName, (int32)CreateModResult);
 			Callback(FGamingServiceResult(false));
 			return;
 		}
 
+		EOS_SessionModification_SetPermissionLevelOptions PermissionOptions = {};
+		PermissionOptions.ApiVersion = EOS_SESSIONMODIFICATION_SETPERMISSIONLEVEL_API_LATEST;
+		PermissionOptions.PermissionLevel = Settings.Privacy == ESessionPrivacy::Public
+			? EOS_EOnlineSessionPermissionLevel::EOS_OSPF_PublicAdvertised
+			: EOS_EOnlineSessionPermissionLevel::EOS_OSPF_InviteOnly;
+		const EOS_EResult PermissionResult = EOS_SessionModification_SetPermissionLevel(SessionModHandle, &PermissionOptions);
+
 		EOS_SessionModification_SetJoinInProgressAllowedOptions JoinIPOptions = {};
 		JoinIPOptions.ApiVersion = EOS_SESSIONMODIFICATION_SETJOININPROGRESSALLOWED_API_LATEST;
 		JoinIPOptions.bAllowJoinInProgress = Settings.bAllowJoinInProgress ? EOS_TRUE : EOS_FALSE;
-		EOS_SessionModification_SetJoinInProgressAllowed(SessionModHandle, &JoinIPOptions);
+		const EOS_EResult JoinResult = EOS_SessionModification_SetJoinInProgressAllowed(SessionModHandle, &JoinIPOptions);
+
+		if (PermissionResult != EOS_EResult::EOS_Success || JoinResult != EOS_EResult::EOS_Success)
+		{
+			UE_LOG(LogTemp, Error, TEXT("EOSGamingService: Failed to configure session %s (permission=%d, join=%d)"), OperationName, (int32)PermissionResult, (int32)JoinResult);
+			EOS_SessionModification_Release(SessionModHandle);
+			Callback(FGamingServiceResult(false));
+			return;
+		}
 
 		EOS_Sessions_UpdateSessionOptions UpdateOptions = {};
 		UpdateOptions.ApiVersion = EOS_SESSIONS_UPDATESESSION_API_LATEST;
 		UpdateOptions.SessionModificationHandle = SessionModHandle;
 
+		struct FUpdateSessionContext
+		{
+			FSessionUpdateCallbackCtx* CallbackCtx;
+			FSessionSettings UpdatedSettings;
+			FString OperationName;
+			FString SuccessMessage;
+		};
+
 		auto* Ctx = FSessionUpdateCallbackCtx::Create(Owner, MoveTemp(Callback));
+		auto* UpdateCtx = new FUpdateSessionContext{Ctx, Settings, OperationName, SuccessMessage};
 		EOS_Sessions_UpdateSession(
 			SessionsHandle,
 			&UpdateOptions,
-			Ctx,
+			UpdateCtx,
 			[](const EOS_Sessions_UpdateSessionCallbackInfo* Data)
 			{
 				check(Data);
 				check(Data->ClientData);
-				auto* LocalCtx = static_cast<FSessionUpdateCallbackCtx*>(Data->ClientData);
+				auto* LocalCtx = static_cast<FUpdateSessionContext*>(Data->ClientData);
+				FEOSGamingService* Service = LocalCtx && LocalCtx->CallbackCtx ? LocalCtx->CallbackCtx->Service : nullptr;
+				check(Service && Service->Impl);
 
 				FGamingServiceResult Result(Data->ResultCode == EOS_EResult::EOS_Success);
 
 				if (Result.bSuccess)
 				{
-					UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Session updated successfully"));
+					Service->Impl->CurrentSessionSettings = LocalCtx->UpdatedSettings;
+					UE_LOG(LogTemp, Log, TEXT("%s"), *LocalCtx->SuccessMessage);
 				}
 				else
 				{
-					UE_LOG(LogTemp, Error, TEXT("EOSGamingService: Failed to update session: %d"), (int32)Data->ResultCode);
+					UE_LOG(LogTemp, Error, TEXT("EOSGamingService: Failed to %s session: %d"), *LocalCtx->OperationName, (int32)Data->ResultCode);
 				}
 
-				FSessionUpdateCallbackCtx::Complete(LocalCtx, Result);
+				FSessionUpdateCallbackCtx::Complete(LocalCtx->CallbackCtx, Result);
+				delete LocalCtx;
 			}
 		);
 
@@ -1448,6 +1537,10 @@ public:
 			Info.SessionName = CurrentSessionName;
 			Info.HostUserId = UserId;
 			Info.HostDisplayName = DisplayName;
+			Info.MaxPlayers = CurrentSessionSettings.MaxPlayers;
+			Info.Privacy = CurrentSessionSettings.Privacy;
+			Info.bAllowJoinInProgress = CurrentSessionSettings.bAllowJoinInProgress;
+			Info.CustomAttributes = CurrentSessionSettings.CustomAttributes;
 		}
 
 		Callback(Info);
@@ -1510,6 +1603,7 @@ private:
 
 	FString TempStoragePath;
 	FString CurrentSessionName;
+	FSessionSettings CurrentSessionSettings;
 	bool bIsInSession = false;
 	bool bIsSessionHost = false;
 	EOS_NotificationId SessionInviteAcceptedNotificationId = EOS_INVALID_NOTIFICATIONID;
@@ -2850,6 +2944,16 @@ void FEOSGamingService::UpdateSession(const FSessionSettings& Settings,
                                       TFunction<void(const FGamingServiceResult&)> Callback)
 {
 	Impl->UpdateSession(Settings, MoveTemp(Callback));
+}
+
+void FEOSGamingService::LockLobby(TFunction<void(const FGamingServiceResult&)> Callback)
+{
+	Impl->LockLobby(MoveTemp(Callback));
+}
+
+void FEOSGamingService::UnlockLobby(TFunction<void(const FGamingServiceResult&)> Callback)
+{
+	Impl->UnlockLobby(MoveTemp(Callback));
 }
 
 void FEOSGamingService::GetCurrentSession(TFunction<void(const FSessionInfo&)> Callback)

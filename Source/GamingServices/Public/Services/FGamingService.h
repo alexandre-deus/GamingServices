@@ -60,6 +60,8 @@ public:
 	virtual void DestroySession(TFunction<void(const FGamingServiceResult&)> Callback) = 0;
 	virtual void UpdateSession(const FSessionSettings& Settings,
 	                          TFunction<void(const FGamingServiceResult&)> Callback) = 0;
+	virtual void LockLobby(TFunction<void(const FGamingServiceResult&)> Callback) = 0;
+	virtual void UnlockLobby(TFunction<void(const FGamingServiceResult&)> Callback) = 0;
 	virtual void GetCurrentSession(TFunction<void(const FSessionInfo&)> Callback) = 0;
 
 	virtual void ShowInviteFriendsDialog(TFunction<void(const FGamingServiceResult&)> Callback) = 0;
