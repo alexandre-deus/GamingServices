@@ -937,6 +937,7 @@ public:
 			if (JoinResult.bSuccess)
 			{
 				CurrentLobbyId = CSteamID(Result.m_ulSteamIDLobby);
+				CurrentHostId = SteamMatchmaking->GetLobbyOwner(CurrentLobbyId);
 				bIsInLobby = true;
 				bIsLobbyHost = false;
 
@@ -1217,6 +1218,7 @@ private:
 	ISteamApps* SteamApps = nullptr;
 
 	CSteamID CurrentLobbyId;
+	CSteamID CurrentHostId;
 	bool bIsInLobby = false;
 	bool bIsLobbyHost = false;
 	TSet<uint64> CurrentLobbyMembers;
@@ -1257,6 +1259,14 @@ private:
 			if (Owner->OnSessionUserLeft)
 			{
 				Owner->OnSessionUserLeft(FSessionMemberInfo(ChangedUserId, ChangedDisplayName));
+			}
+			if (ChangedUser == CurrentHostId)
+			{
+				UE_LOG(LogTemp, Warning, TEXT("SteamworksGamingService: Host has left the lobby"));
+				if (Owner->OnSessionEnded)
+				{
+					Owner->OnSessionEnded(FGamingServiceResult(true));
+				}
 			}
 		}
 	}

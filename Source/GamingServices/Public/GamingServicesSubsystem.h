@@ -48,6 +48,8 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGamingSessionJoined, const FSessi
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGamingSessionLeft, const FGamingServiceResult&, Result);
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGamingSessionEnded, const FGamingServiceResult&, Result);
+
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGamingSessionDestroyed, const FGamingServiceResult&, Result);
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGamingSessionUpdated, const FGamingServiceResult&, Result);
@@ -223,6 +225,8 @@ public:
 	FOnGamingSessionJoined OnSessionJoined;
 	UPROPERTY(BlueprintAssignable, Category = "GamingServices|Events")
 	FOnGamingSessionLeft OnSessionLeft;
+	UPROPERTY(BlueprintAssignable, Category = "GamingServices|Events")
+	FOnGamingSessionEnded OnSessionEnded;
 	UPROPERTY(BlueprintAssignable, Category = "GamingServices|Events")
 	FOnGamingSessionDestroyed OnSessionDestroyed;
 	UPROPERTY(BlueprintAssignable, Category = "GamingServices|Events")

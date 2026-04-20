@@ -29,6 +29,10 @@ void UGamingServicesSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	{
 		OnLobbyInviteAccepted.Broadcast(InviteInfo);
 	};
+	Service->OnSessionEnded = [this](const FGamingServiceResult& Result)
+	{
+		OnSessionEnded.Broadcast(Result);
+	};
 
 	Super::Initialize(Collection);
 }

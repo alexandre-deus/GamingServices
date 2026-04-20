@@ -71,6 +71,7 @@ public:
 	// Session event callbacks (set by subsystem, fired by implementation)
 	TFunction<void(const FSessionMemberInfo&)> OnSessionUserJoined;
 	TFunction<void(const FSessionMemberInfo&)> OnSessionUserLeft;
+	TFunction<void(const FGamingServiceResult&)> OnSessionEnded;
 	TFunction<void(const FLobbyInviteAcceptedInfo&)> OnLobbyInviteAccepted;
 
 	virtual void Tick() = 0;
