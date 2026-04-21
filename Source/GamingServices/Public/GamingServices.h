@@ -3,8 +3,7 @@
 
 #include "CoreMinimal.h"
 #include "Modules/ModuleManager.h"
-
-class IGamingService;
+#include "Services/FGamingService.h"
 
 class GAMINGSERVICES_API FGamingServicesModule : public IModuleInterface
 {
@@ -12,6 +11,8 @@ public:
 	virtual void StartupModule() override;
 	virtual void ShutdownModule() override;
 
+	FGamingService& GetService() const { return *Service; }
+
 private:
-	bool bSocketSubsystemEnabled = false;
+	TUniquePtr<FGamingService> Service;
 };

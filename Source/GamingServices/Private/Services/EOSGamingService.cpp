@@ -172,9 +172,6 @@ public:
 			SessionInviteAcceptedNotificationId = EOS_INVALID_NOTIFICATIONID;
 		}
 
-		ShutdownEOSPlatform();
-
-		bIsInitialized = false;
 		bIsConnected = false;
 		bIsLoggedIn = false;
 		UserId.Empty();
@@ -1580,6 +1577,8 @@ public:
 	}
 
 private:
+	friend class FEOSGamingService;
+
 	FEOSGamingService* Owner;
 
 	EOS_HPlatform PlatformHandle = nullptr;
@@ -2786,14 +2785,34 @@ FEOSGamingService::~FEOSGamingService()
 {
 }
 
-bool FEOSGamingService::Connect(const FGamingServiceConnectParams& Params)
+void FEOSGamingService::InitializePlatform()
 {
-	return Impl->Connect(Params.EOS);
+	const TCHAR* Section = TEXT("GamingServices.EOS");
+	FEOSInitOptions Opts;
+	const bool bComplete =
+		GConfig->GetString(Section, TEXT("ProductName"),    Opts.ProductName,    GGameIni) &&
+		GConfig->GetString(Section, TEXT("ProductVersion"), Opts.ProductVersion,  GGameIni) &&
+		GConfig->GetString(Section, TEXT("ProductId"),      Opts.ProductId,       GGameIni) &&
+		GConfig->GetString(Section, TEXT("SandboxId"),      Opts.SandboxId,       GGameIni) &&
+		GConfig->GetString(Section, TEXT("DeploymentId"),   Opts.DeploymentId,    GGameIni) &&
+		GConfig->GetString(Section, TEXT("ClientId"),       Opts.ClientId,        GGameIni) &&
+		GConfig->GetString(Section, TEXT("ClientSecret"),   Opts.ClientSecret,    GGameIni) &&
+		GConfig->GetString(Section, TEXT("EncryptionKey"),  Opts.EncryptionKey,   GGameIni);
+
+	if (!bComplete)
+	{
+		UE_LOG(LogTemp, Error, TEXT("EOSGamingService: Missing required config in [GamingServices.EOS]. "
+			"Required keys: ProductName, ProductVersion, ProductId, SandboxId, DeploymentId, ClientId, ClientSecret, EncryptionKey"));
+		return;
+	}
+
+	Impl->InitializeEOSPlatform(Opts);
 }
 
-void FEOSGamingService::Shutdown()
+void FEOSGamingService::DestroyPlatform()
 {
 	Impl->Shutdown();
+	Impl->ShutdownEOSPlatform();
 }
 
 void FEOSGamingService::UnlockAchievement(const FString& AchievementId,

@@ -72,13 +72,6 @@ class GAMINGSERVICES_API UGamingServicesSubsystem : public UGameInstanceSubsyste
 	GENERATED_BODY()
 
 public:
-	// Connection / initialization
-	UFUNCTION(BlueprintCallable, Category = "GamingServices")
-	bool Connect(const FGamingServiceConnectParams& Params);
-
-	UFUNCTION(BlueprintCallable, Category = "GamingServices")
-	void Shutdown();
-
 	// Achievement API
 	UFUNCTION(BlueprintCallable, Category = "GamingServices|Achievements")
 	void UnlockAchievement(const FString& AchievementId);
@@ -247,7 +240,7 @@ public:
 	FGamingService& GetService() const { return *Service; }
 
 private:
-	TUniquePtr<FGamingService> Service;
+	FGamingService* Service = nullptr;
 	TMap<FName, FEntitlementDefinition> EntitlementCatalog;
 
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;

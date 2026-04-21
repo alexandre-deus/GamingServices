@@ -10,8 +10,8 @@ public:
 	FNullGamingService();
 	virtual ~FNullGamingService() override;
 
-	virtual bool Connect(const FGamingServiceConnectParams& Params) override;
-	virtual void Shutdown() override;
+	virtual void InitializePlatform() override;
+	virtual void DestroyPlatform() override;
 
 	virtual void Login(const FGamingServiceLoginParams& Params,
 	                   TFunction<void(const FGamingServiceResult&)> Callback) override;

@@ -1,19 +1,11 @@
 #include "GamingServicesSubsystem.h"
-#include "Misc/ConfigCacheIni.h"
-#include "GamingServiceTypes.h"
-#include "Services/EOSGamingService.h"
-#include "Services/SteamworksGamingService.h"
-#include "Services/NullGamingService.h"
+#include "GamingServices.h"
+#include "Modules/ModuleManager.h"
 
 void UGamingServicesSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
-#ifdef USE_EOS
-	Service = MakeUnique<FEOSGamingService>();
-#elif defined(USE_STEAMWORKS)
-    Service = MakeUnique<FSteamworksGamingService>();
-#else
-	Service = MakeUnique<FNullGamingService>();
-#endif
+	FGamingServicesModule& Module = FModuleManager::GetModuleChecked<FGamingServicesModule>(TEXT("GamingServices"));
+	Service = &Module.GetService();
 	check(Service);
 
 	// Wire up session event callbacks from the service to subsystem delegates
@@ -39,7 +31,7 @@ void UGamingServicesSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 
 void UGamingServicesSubsystem::Deinitialize()
 {
-	Service->Shutdown();
+	Service = nullptr;
 }
 
 void UGamingServicesSubsystem::Tick(float DeltaTime)
@@ -50,16 +42,6 @@ void UGamingServicesSubsystem::Tick(float DeltaTime)
 TStatId UGamingServicesSubsystem::GetStatId() const
 {
 	RETURN_QUICK_DECLARE_CYCLE_STAT(UGamingServicesSubsystem, STATGROUP_Tickables);
-}
-
-bool UGamingServicesSubsystem::Connect(const FGamingServiceConnectParams& Params)
-{
-	return Service->Connect(Params);
-}
-
-void UGamingServicesSubsystem::Shutdown()
-{
-	Service->Shutdown();
 }
 
 void UGamingServicesSubsystem::UnlockAchievement(const FString& AchievementId)

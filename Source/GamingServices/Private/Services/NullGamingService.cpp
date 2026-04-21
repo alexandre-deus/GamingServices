@@ -12,16 +12,13 @@ FNullGamingService::~FNullGamingService()
 {
 }
 
-bool FNullGamingService::Connect(const FGamingServiceConnectParams& Params)
+void FNullGamingService::InitializePlatform()
 {
-	UE_LOG(LogTemp, Warning, TEXT("NullGamingService: Connect called - no SDK available"));
 	bInitialized = true;
-	return true;
 }
 
-void FNullGamingService::Shutdown()
+void FNullGamingService::DestroyPlatform()
 {
-	UE_LOG(LogTemp, Warning, TEXT("NullGamingService: Shutdown called"));
 	bInitialized = false;
 	bLoggedIn = false;
 }

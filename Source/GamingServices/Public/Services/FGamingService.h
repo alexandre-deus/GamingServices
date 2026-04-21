@@ -10,8 +10,8 @@ class GAMINGSERVICES_API FGamingService
 public:
 	virtual ~FGamingService() = default;
 
-	virtual bool Connect(const FGamingServiceConnectParams& Params) = 0;
-	virtual void Shutdown() = 0;
+	virtual void InitializePlatform() {}
+	virtual void DestroyPlatform() {}
 
 	virtual void Login(const FGamingServiceLoginParams& Params,
 	                   TFunction<void(const FGamingServiceResult&)> Callback) = 0;

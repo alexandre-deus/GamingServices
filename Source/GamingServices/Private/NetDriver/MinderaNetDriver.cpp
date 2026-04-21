@@ -346,6 +346,7 @@ void UMinderaNetDriver::TickDispatch(float DeltaTime)
 
 	// Client path: UNetDriver base tick + drain messages from server connection
 	UNetDriver::TickDispatch(DeltaTime);
+	UE_LOG(LogMinderaNet, VeryVerbose, TEXT("[Driver] TickDispatch: checking for messages from server"));
 
 	if (ServerConnection)
 	{

@@ -3,8 +3,12 @@
 #include "Services/SteamworksGamingService.h"
 #include "Engine/World.h"
 #include "HAL/CriticalSection.h"
+#include "HAL/PlatformMisc.h"
+#include "Misc/ConfigCacheIni.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "SocketSubsystemModule.h"
+#include "NetDriver/MinderaSocketSubsystem.h"
 
 #include "steam/steam_api.h"
 
@@ -52,9 +56,6 @@ public:
 	{
 		UE_LOG(LogTemp, Log, TEXT("SteamworksGamingService: Starting shutdown..."));
 
-		ShutdownSteamworks();
-
-		bIsInitialized = false;
 		bIsLoggedIn = false;
 		UserId.Empty();
 		DisplayName.Empty();
@@ -1202,6 +1203,8 @@ public:
 	}
 
 private:
+	friend class FSteamworksGamingService;
+
 	FSteamworksGamingService* Owner;
 
 	bool bIsInitialized = false;
@@ -1547,12 +1550,55 @@ FSteamworksGamingService::FSteamworksGamingService() { Impl = MakeUnique<FSteamw
 
 FSteamworksGamingService::~FSteamworksGamingService() {}
 
-bool FSteamworksGamingService::Connect(const FGamingServiceConnectParams& Params)
+void FSteamworksGamingService::InitializePlatform()
 {
-	return Impl->Connect(Params.Steamworks);
+	// Socket subsystem must be registered before SteamAPI_InitEx
+	FMinderaSocketSubsystem* SocketSubsystem = FMinderaSocketSubsystem::Create();
+	if (SocketSubsystem)
+	{
+		FString Error;
+		if (SocketSubsystem->Init(Error))
+		{
+			bSocketSubsystemEnabled = true;
+			FSocketSubsystemModule& SSModule = FModuleManager::LoadModuleChecked<FSocketSubsystemModule>(TEXT("Sockets"));
+			SSModule.RegisterSocketSubsystem(MINDERA_SOCKET_SUBSYSTEM_NAME, SocketSubsystem, false);
+			UE_LOG(LogTemp, Log, TEXT("SteamworksGamingService: Registered MinderaSteam socket subsystem"));
+		}
+		else
+		{
+			UE_LOG(LogTemp, Warning, TEXT("SteamworksGamingService: Failed to init MinderaSteam socket subsystem: %s"), *Error);
+			FMinderaSocketSubsystem::Destroy();
+		}
+	}
+
+	FString AppId;
+	if (GConfig->GetString(TEXT("GamingServices.Steamworks"), TEXT("AppId"), AppId, GGameIni))
+	{
+		FPlatformMisc::SetEnvironmentVar(TEXT("SteamAppId"), *AppId);
+		UE_LOG(LogTemp, Log, TEXT("SteamworksGamingService: Set SteamAppId=%s from config"), *AppId);
+	}
+
+	Impl->InitializeSteamworks();
 }
 
-void FSteamworksGamingService::Shutdown() { Impl->Shutdown(); }
+void FSteamworksGamingService::DestroyPlatform()
+{
+	Impl->Shutdown();
+	Impl->ShutdownSteamworks();
+
+	if (bSocketSubsystemEnabled)
+	{
+		FModuleManager& ModuleManager = FModuleManager::Get();
+		if (ModuleManager.IsModuleLoaded(TEXT("Sockets")))
+		{
+			FSocketSubsystemModule& SSModule = FModuleManager::GetModuleChecked<FSocketSubsystemModule>(TEXT("Sockets"));
+			SSModule.UnregisterSocketSubsystem(MINDERA_SOCKET_SUBSYSTEM_NAME);
+		}
+		FMinderaSocketSubsystem::Destroy();
+		UE_LOG(LogTemp, Log, TEXT("SteamworksGamingService: Unregistered MinderaSteam socket subsystem"));
+		bSocketSubsystemEnabled = false;
+	}
+}
 
 void FSteamworksGamingService::Login(const FGamingServiceLoginParams& Params, TFunction<void(const FGamingServiceResult&)> Callback)
 {
