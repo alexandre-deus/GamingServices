@@ -15,4 +15,5 @@ public:
 
 private:
 	TUniquePtr<FGamingService> Service;
+	bool bSocketSubsystemEnabled = false;
 };

@@ -25,12 +25,12 @@ UMinderaNetDriver* UMinderaNetDriver::sActiveCallbackDriver = nullptr;
 UMinderaNetDriver::UMinderaNetDriver(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
 {
-	UE_LOG(LogMinderaNet, Verbose, TEXT("[Driver] Constructor"));
+	UE_LOG(LogMinderaNet, Verbose, TEXT("[UMinderaNetDriver] Constructor"));
 }
 
 void UMinderaNetDriver::PostInitProperties()
 {
-	UE_LOG(LogMinderaNet, Verbose, TEXT("[Driver] PostInitProperties"));
+	UE_LOG(LogMinderaNet, Verbose, TEXT("[UMinderaNetDriver] PostInitProperties"));
 	Super::PostInitProperties();
 }
 
@@ -40,7 +40,7 @@ void UMinderaNetDriver::PostInitProperties()
 bool UMinderaNetDriver::IsAvailable() const
 {
 	const bool bAvailable = SteamNetworkingSockets() != nullptr;
-	UE_LOG(LogMinderaNet, Verbose, TEXT("[Driver] IsAvailable: %s"), bAvailable ? TEXT("true") : TEXT("false"));
+	UE_LOG(LogMinderaNet, Verbose, TEXT("[UMinderaNetDriver] IsAvailable: %s"), bAvailable ? TEXT("true") : TEXT("false"));
 	return bAvailable;
 }
 
@@ -51,10 +51,10 @@ ISocketSubsystem* UMinderaNetDriver::GetSocketSubsystem()
 {
 	if (bIsPassthrough)
 	{
-		UE_LOG(LogMinderaNet, VeryVerbose, TEXT("[Driver] GetSocketSubsystem: using PLATFORM_SOCKETSUBSYSTEM (passthrough)"));
+		UE_LOG(LogMinderaNet, VeryVerbose, TEXT("[UMinderaNetDriver] GetSocketSubsystem: using PLATFORM_SOCKETSUBSYSTEM (passthrough)"));
 		return ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
 	}
-	UE_LOG(LogMinderaNet, VeryVerbose, TEXT("[Driver] GetSocketSubsystem: using MinderaSteam"));
+	UE_LOG(LogMinderaNet, VeryVerbose, TEXT("[UMinderaNetDriver] GetSocketSubsystem: using MinderaSteam"));
 	return ISocketSubsystem::Get(MINDERA_SOCKET_SUBSYSTEM_NAME);
 }
 
@@ -63,11 +63,11 @@ ISteamNetworkingSockets* UMinderaNetDriver::GetSteamSocketsInterface() const
 {
 	if (IsRunningDedicatedServer() && SteamGameServerNetworkingSockets())
 	{
-		UE_LOG(LogMinderaNet, VeryVerbose, TEXT("[Driver] GetSteamSocketsInterface: using GameServer interface"));
+		UE_LOG(LogMinderaNet, VeryVerbose, TEXT("[UMinderaNetDriver] GetSteamSocketsInterface: using GameServer interface"));
 		return SteamGameServerNetworkingSockets();
 	}
 	ISteamNetworkingSockets* Iface = SteamNetworkingSockets();
-	UE_LOG(LogMinderaNet, VeryVerbose, TEXT("[Driver] GetSteamSocketsInterface: using Client interface (ptr=%p)"), Iface);
+	UE_LOG(LogMinderaNet, VeryVerbose, TEXT("[UMinderaNetDriver] GetSteamSocketsInterface: using Client interface (ptr=%p)"), Iface);
 	return Iface;
 }
 
@@ -77,23 +77,23 @@ ISteamNetworkingSockets* UMinderaNetDriver::GetSteamSocketsInterface() const
 bool UMinderaNetDriver::InitBase(bool bInitAsClient, FNetworkNotify* InNotify,
 	const FURL& URL, bool bReuseAddressAndPort, FString& Error)
 {
-	UE_LOG(LogMinderaNet, Log, TEXT("[Driver] InitBase: bInitAsClient=%d, bIsPassthrough=%d, URL.Host='%s', URL.Port=%d"),
+	UE_LOG(LogMinderaNet, Log, TEXT("[UMinderaNetDriver] InitBase: bInitAsClient=%d, bIsPassthrough=%d, URL.Host='%s', URL.Port=%d"),
 		(int32)bInitAsClient, (int32)bIsPassthrough, *URL.Host, URL.Port);
 
 	if (bIsPassthrough)
 	{
-		UE_LOG(LogMinderaNet, Verbose, TEXT("[Driver] InitBase: delegating to UIpNetDriver (passthrough)"));
+		UE_LOG(LogMinderaNet, Verbose, TEXT("[UMinderaNetDriver] InitBase: delegating to UIpNetDriver (passthrough)"));
 		return UIpNetDriver::InitBase(bInitAsClient, InNotify, URL, bReuseAddressAndPort, Error);
 	}
 
 	// Steam path: only need UNetDriver base init (no BSD socket)
 	if (!UNetDriver::InitBase(bInitAsClient, InNotify, URL, bReuseAddressAndPort, Error))
 	{
-		UE_LOG(LogMinderaNet, Error, TEXT("[Driver] InitBase FAILED (Steam path): %s"), *Error);
+		UE_LOG(LogMinderaNet, Error, TEXT("[UMinderaNetDriver] InitBase FAILED (Steam path): %s"), *Error);
 		return false;
 	}
 
-	UE_LOG(LogMinderaNet, Verbose, TEXT("[Driver] InitBase: SUCCESS (Steam path)"));
+	UE_LOG(LogMinderaNet, Verbose, TEXT("[UMinderaNetDriver] InitBase: SUCCESS (Steam path)"));
 	return true;
 }
 
@@ -102,12 +102,12 @@ bool UMinderaNetDriver::InitBase(bool bInitAsClient, FNetworkNotify* InNotify,
 // ---------------------------------------------------------------------------
 bool UMinderaNetDriver::InitConnect(FNetworkNotify* InNotify, const FURL& ConnectURL, FString& Error)
 {
-	UE_LOG(LogMinderaNet, Log, TEXT("[Driver] InitConnect: Host='%s'"), *ConnectURL.Host);
+	UE_LOG(LogMinderaNet, Log, TEXT("[UMinderaNetDriver] InitConnect: Host='%s'"), *ConnectURL.Host);
 
 	ISteamNetworkingSockets* Sockets = GetSteamSocketsInterface();
 	if (!Sockets || !ConnectURL.Host.StartsWith(MinderaSteamURLPrefix))
 	{
-		UE_LOG(LogMinderaNet, Log, TEXT("[Driver] InitConnect: falling back to IP passthrough"));
+		UE_LOG(LogMinderaNet, Log, TEXT("[UMinderaNetDriver] InitConnect: falling back to IP passthrough"));
 		bIsPassthrough = true;
 		return Super::InitConnect(InNotify, ConnectURL, Error);
 	}
@@ -134,7 +134,7 @@ bool UMinderaNetDriver::InitConnect(FNetworkNotify* InNotify, const FURL& Connec
 	SteamNetworkingIdentity RemoteIdentity;
 	RemoteIdentity.SetSteamID64(RemoteSteamId64);
 
-	UE_LOG(LogMinderaNet, Log, TEXT("[Driver] InitConnect: ConnectP2P to SteamID %llu (vport %d)"), RemoteSteamId64, SteamVirtualPort);
+	UE_LOG(LogMinderaNet, Log, TEXT("[UMinderaNetDriver] InitConnect: ConnectP2P to SteamID %llu (vport %d)"), RemoteSteamId64, SteamVirtualPort);
 	HSteamNetConnection hConn = Sockets->ConnectP2P(RemoteIdentity, SteamVirtualPort, 1, &Opt);
 	if (hConn == k_HSteamNetConnection_Invalid)
 	{
@@ -169,7 +169,7 @@ bool UMinderaNetDriver::InitConnect(FNetworkNotify* InNotify, const FURL& Connec
 
 	CreateInitialClientChannels();
 
-	UE_LOG(LogMinderaNet, Log, TEXT("[Driver] InitConnect: SUCCESS (SteamID=%llu, handle=%u)"), RemoteSteamId64, hConn);
+	UE_LOG(LogMinderaNet, Log, TEXT("[UMinderaNetDriver] InitConnect: SUCCESS (SteamID=%llu, handle=%u)"), RemoteSteamId64, hConn);
 	return true;
 }
 
@@ -185,7 +185,7 @@ bool UMinderaNetDriver::InitListen(FNetworkNotify* InNotify, FURL& ListenURL,
 
 	if (!Sockets || bForceFallback)
 	{
-		UE_LOG(LogMinderaNet, Log, TEXT("[Driver] InitListen: falling back to IP passthrough"));
+		UE_LOG(LogMinderaNet, Log, TEXT("[UMinderaNetDriver] InitListen: falling back to IP passthrough"));
 		bIsPassthrough = true;
 		return Super::InitListen(InNotify, ListenURL, bReuseAddressAndPort, Error);
 	}
@@ -197,11 +197,11 @@ bool UMinderaNetDriver::InitListen(FNetworkNotify* InNotify, FURL& ListenURL,
 	Opt.SetPtr(k_ESteamNetworkingConfig_Callback_ConnectionStatusChanged,
 		(void*)&UMinderaNetDriver::SteamConnectionStatusChangedThunk);
 
-	UE_LOG(LogMinderaNet, Log, TEXT("[Driver] InitListen: CreateListenSocketP2P (vport %d)"), SteamVirtualPort);
+	UE_LOG(LogMinderaNet, Log, TEXT("[UMinderaNetDriver] InitListen: CreateListenSocketP2P (vport %d)"), SteamVirtualPort);
 	HSteamListenSocket ListenHandle = Sockets->CreateListenSocketP2P(SteamVirtualPort, 1, &Opt);
 	if (ListenHandle == k_HSteamListenSocket_Invalid)
 	{
-		Error = TEXT("MinderaNetDriver: CreateListenSocketP2P failed");
+		Error = TEXT("[UMinderaNetDriver] CreateListenSocketP2P failed");
 		return false;
 	}
 
@@ -209,7 +209,7 @@ bool UMinderaNetDriver::InitListen(FNetworkNotify* InNotify, FURL& ListenURL,
 	if (PollGroupHandle == k_HSteamNetPollGroup_Invalid)
 	{
 		Sockets->CloseListenSocket(ListenHandle);
-		Error = TEXT("MinderaNetDriver: CreatePollGroup failed");
+		Error = TEXT("[UMinderaNetDriver] CreatePollGroup failed");
 		return false;
 	}
 
@@ -234,7 +234,7 @@ bool UMinderaNetDriver::InitListen(FNetworkNotify* InNotify, FURL& ListenURL,
 		return false;
 	}
 
-	UE_LOG(LogMinderaNet, Log, TEXT("[Driver] InitListen: SUCCESS (listen=%u, poll=%u)"), ListenHandle, PollGroupHandle);
+	UE_LOG(LogMinderaNet, Log, TEXT("[UMinderaNetDriver] InitListen: SUCCESS (listen=%u, poll=%u)"), ListenHandle, PollGroupHandle);
 	return true;
 }
 
@@ -251,7 +251,7 @@ void UMinderaNetDriver::LowLevelSend(TSharedPtr<const FInternetAddr> Address, vo
 
 	if (!Address.IsValid())
 	{
-		UE_LOG(LogMinderaNet, VeryVerbose, TEXT("[Driver] LowLevelSend: invalid address, dropping"));
+		UE_LOG(LogMinderaNet, VeryVerbose, TEXT("[UMinderaNetDriver] LowLevelSend: invalid address, dropping"));
 		return;
 	}
 
@@ -261,11 +261,11 @@ void UMinderaNetDriver::LowLevelSend(TSharedPtr<const FInternetAddr> Address, vo
 	ISteamNetworkingSockets* Sockets = GetSteamSocketsInterface();
 	if (!Sockets)
 	{
-		UE_LOG(LogMinderaNet, Warning, TEXT("[Driver] LowLevelSend: Steam sockets interface is null"));
+		UE_LOG(LogMinderaNet, Warning, TEXT("[UMinderaNetDriver] LowLevelSend: Steam sockets interface is null"));
 		return;
 	}
 
-	UE_LOG(LogMinderaNet, VeryVerbose, TEXT("[Driver] LowLevelSend: %d bits (%d bytes) to %s"),
+	UE_LOG(LogMinderaNet, VeryVerbose, TEXT("[UMinderaNetDriver] LowLevelSend: %d bits (%d bytes) to %s"),
 		CountBits, DataLen, *Address->ToString(true));
 
 	// Search client connections for a matching address
@@ -303,14 +303,14 @@ void UMinderaNetDriver::LowLevelSend(TSharedPtr<const FInternetAddr> Address, vo
 		HSteamNetConnection Handle = FindSteamHandleForIdentity(Identity);
 		if (Handle != k_HSteamNetConnection_Invalid)
 		{
-			UE_LOG(LogMinderaNet, Verbose, TEXT("[Driver] LowLevelSend: using pending handle=%u for %s"), Handle, *Address->ToString(true));
+			UE_LOG(LogMinderaNet, Verbose, TEXT("[UMinderaNetDriver] LowLevelSend: using pending handle=%u for %s"), Handle, *Address->ToString(true));
 			Sockets->SendMessageToConnection(Handle, Data, static_cast<uint32>(DataLen),
 				k_nSteamNetworkingSend_UnreliableNoNagle, nullptr);
 			return;
 		}
 	}
 
-	UE_LOG(LogMinderaNet, Warning, TEXT("[Driver] LowLevelSend: no matching connection for %s, dropping %d bytes"), *Address->ToString(true), DataLen);
+	UE_LOG(LogMinderaNet, Warning, TEXT("[UMinderaNetDriver] LowLevelSend: no matching connection for %s, dropping %d bytes"), *Address->ToString(true), DataLen);
 }
 
 // ---------------------------------------------------------------------------
@@ -327,7 +327,7 @@ void UMinderaNetDriver::TickDispatch(float DeltaTime)
 	ISteamNetworkingSockets* Sockets = GetSteamSocketsInterface();
 	if (!Sockets)
 	{
-		UE_LOG(LogMinderaNet, Warning, TEXT("[Driver] TickDispatch: Steam sockets interface is null, skipping"));
+		UE_LOG(LogMinderaNet, Warning, TEXT("[UMinderaNetDriver] TickDispatch: Steam sockets interface is null, skipping"));
 		return;
 	}
 
@@ -346,7 +346,7 @@ void UMinderaNetDriver::TickDispatch(float DeltaTime)
 
 	// Client path: UNetDriver base tick + drain messages from server connection
 	UNetDriver::TickDispatch(DeltaTime);
-	UE_LOG(LogMinderaNet, VeryVerbose, TEXT("[Driver] TickDispatch: checking for messages from server"));
+	UE_LOG(LogMinderaNet, VeryVerbose, TEXT("[UMinderaNetDriver] TickDispatch: checking for messages from server"));
 
 	if (ServerConnection)
 	{
@@ -361,7 +361,7 @@ void UMinderaNetDriver::TickDispatch(float DeltaTime)
 			for (int32 i = 0; i < MsgCount; ++i)
 			{
 				SteamNetworkingMessage_t* Msg = IncomingMessages[i];
-				UE_LOG(LogMinderaNet, VeryVerbose, TEXT("[Driver] TickDispatch: client received %d bytes from server"), Msg->m_cbSize);
+				UE_LOG(LogMinderaNet, VeryVerbose, TEXT("[UMinderaNetDriver] TickDispatch: client received %d bytes from server"), Msg->m_cbSize);
 				SteamConn->ReceivedRawPacket(const_cast<uint8*>(static_cast<const uint8*>(Msg->m_pData)), Msg->m_cbSize);
 				Msg->Release();
 			}
@@ -374,7 +374,7 @@ void UMinderaNetDriver::TickDispatch(float DeltaTime)
 // ---------------------------------------------------------------------------
 void UMinderaNetDriver::Shutdown()
 {
-	UE_LOG(LogMinderaNet, Log, TEXT("[Driver] Shutdown: bIsPassthrough=%d, ClientConnections=%d, ServerConnection=%s, SteamSocket=%s"),
+	UE_LOG(LogMinderaNet, Log, TEXT("[UMinderaNetDriver] Shutdown: bIsPassthrough=%d, ClientConnections=%d, ServerConnection=%s, SteamSocket=%s"),
 		(int32)bIsPassthrough, ClientConnections.Num(),
 		ServerConnection ? TEXT("valid") : TEXT("null"),
 		SteamSocket ? TEXT("valid") : TEXT("null"));
@@ -391,7 +391,7 @@ void UMinderaNetDriver::Shutdown()
 				UMinderaNetConnection* MC = Cast<UMinderaNetConnection>(ClientConn);
 				if (MC && MC->SteamConnectionHandle != k_HSteamNetConnection_Invalid)
 				{
-					UE_LOG(LogMinderaNet, Verbose, TEXT("[Driver] Shutdown: flushing messages on client handle=%u"), MC->SteamConnectionHandle);
+					UE_LOG(LogMinderaNet, Verbose, TEXT("[UMinderaNetDriver] Shutdown: flushing messages on client handle=%u"), MC->SteamConnectionHandle);
 					Sockets->FlushMessagesOnConnection(MC->SteamConnectionHandle);
 				}
 			}
@@ -400,33 +400,33 @@ void UMinderaNetDriver::Shutdown()
 				UMinderaNetConnection* SrvConn = Cast<UMinderaNetConnection>(ServerConnection);
 				if (SrvConn && SrvConn->SteamConnectionHandle != k_HSteamNetConnection_Invalid)
 				{
-					UE_LOG(LogMinderaNet, Verbose, TEXT("[Driver] Shutdown: flushing messages on server handle=%u"), SrvConn->SteamConnectionHandle);
+					UE_LOG(LogMinderaNet, Verbose, TEXT("[UMinderaNetDriver] Shutdown: flushing messages on server handle=%u"), SrvConn->SteamConnectionHandle);
 					Sockets->FlushMessagesOnConnection(SrvConn->SteamConnectionHandle);
 				}
 			}
 		}
 		else
 		{
-			UE_LOG(LogMinderaNet, Warning, TEXT("[Driver] Shutdown: Steam sockets interface is null, cannot flush"));
+			UE_LOG(LogMinderaNet, Warning, TEXT("[UMinderaNetDriver] Shutdown: Steam sockets interface is null, cannot flush"));
 		}
 	}
 
 	if (sActiveCallbackDriver == this)
 	{
-		UE_LOG(LogMinderaNet, Verbose, TEXT("[Driver] Shutdown: clearing sActiveCallbackDriver"));
+		UE_LOG(LogMinderaNet, Verbose, TEXT("[UMinderaNetDriver] Shutdown: clearing sActiveCallbackDriver"));
 		sActiveCallbackDriver = nullptr;
 	}
 
 	if (SteamSocket)
 	{
-		UE_LOG(LogMinderaNet, Verbose, TEXT("[Driver] Shutdown: deleting SteamSocket (handle=%u, listen=%d)"),
+		UE_LOG(LogMinderaNet, Verbose, TEXT("[UMinderaNetDriver] Shutdown: deleting SteamSocket (handle=%u, listen=%d)"),
 			SteamSocket->GetInternalHandle(), (int32)SteamSocket->IsListenSocket());
 		SteamSocket.Reset();
 	}
 
-	UE_LOG(LogMinderaNet, Verbose, TEXT("[Driver] Shutdown: calling Super::Shutdown"));
+	UE_LOG(LogMinderaNet, Verbose, TEXT("[UMinderaNetDriver] Shutdown: calling Super::Shutdown"));
 	Super::Shutdown();
-	UE_LOG(LogMinderaNet, Log, TEXT("[Driver] Shutdown: COMPLETE"));
+	UE_LOG(LogMinderaNet, Log, TEXT("[UMinderaNetDriver] Shutdown: COMPLETE"));
 }
 
 // ---------------------------------------------------------------------------
@@ -435,7 +435,7 @@ bool UMinderaNetDriver::IsNetResourceValid()
 	if (bIsPassthrough)
 	{
 		const bool bValid = UIpNetDriver::IsNetResourceValid();
-		UE_LOG(LogMinderaNet, VeryVerbose, TEXT("[Driver] IsNetResourceValid (passthrough): %s"), bValid ? TEXT("true") : TEXT("false"));
+		UE_LOG(LogMinderaNet, VeryVerbose, TEXT("[UMinderaNetDriver] IsNetResourceValid (passthrough): %s"), bValid ? TEXT("true") : TEXT("false"));
 		return bValid;
 	}
 	// Mirror the official driver: check that both the socket and the Steam interface are valid.
@@ -443,7 +443,7 @@ bool UMinderaNetDriver::IsNetResourceValid()
 	const bool bHasHandle = bHasSocket && SteamSocket->GetInternalHandle() != k_HSteamNetConnection_Invalid;
 	const bool bHasInterface = GetSteamSocketsInterface() != nullptr;
 	const bool bValid = bHasSocket && bHasHandle && bHasInterface;
-	UE_LOG(LogMinderaNet, VeryVerbose, TEXT("[Driver] IsNetResourceValid (Steam): %s (socket=%s, handle=%s, interface=%s)"),
+	UE_LOG(LogMinderaNet, VeryVerbose, TEXT("[UMinderaNetDriver] IsNetResourceValid (Steam): %s (socket=%s, handle=%s, interface=%s)"),
 		bValid ? TEXT("true") : TEXT("false"),
 		bHasSocket ? TEXT("valid") : TEXT("null"),
 		bHasHandle ? TEXT("valid") : TEXT("invalid"),
@@ -458,12 +458,12 @@ void UMinderaNetDriver::SteamConnectionStatusChangedThunk(SteamNetConnectionStat
 {
 	if (sActiveCallbackDriver)
 	{
-		UE_LOG(LogMinderaNet, VeryVerbose, TEXT("[Driver] SteamConnectionStatusChangedThunk: routing to active driver"));
+		UE_LOG(LogMinderaNet, VeryVerbose, TEXT("[UMinderaNetDriver] SteamConnectionStatusChangedThunk: routing to active driver"));
 		sActiveCallbackDriver->OnConnectionStatusChanged(pInfo);
 	}
 	else
 	{
-		UE_LOG(LogMinderaNet, Warning, TEXT("[Driver] SteamConnectionStatusChangedThunk: no active driver, callback dropped (conn=%u)"),
+		UE_LOG(LogMinderaNet, Warning, TEXT("[UMinderaNetDriver] SteamConnectionStatusChangedThunk: no active driver, callback dropped (conn=%u)"),
 			pInfo ? pInfo->m_hConn : 0);
 	}
 }
@@ -476,7 +476,7 @@ void UMinderaNetDriver::OnConnectionStatusChanged(SteamNetConnectionStatusChange
 	const ESteamNetworkingConnectionState NewState = pInfo->m_info.m_eState;
 	const HSteamNetConnection hConn = pInfo->m_hConn;
 
-	UE_LOG(LogMinderaNet, Log, TEXT("[Driver] ConnectionStatusChanged: conn=%u, %d -> %d, reason=%d"),
+	UE_LOG(LogMinderaNet, Log, TEXT("[UMinderaNetDriver] ConnectionStatusChanged: conn=%u, %d -> %d, reason=%d"),
 		hConn, (int32)pInfo->m_eOldState, (int32)NewState, pInfo->m_info.m_eEndReason);
 
 	switch (NewState)
@@ -491,7 +491,7 @@ void UMinderaNetDriver::OnConnectionStatusChanged(SteamNetConnectionStatusChange
 			EResult AcceptResult = Sockets->AcceptConnection(hConn);
 			if (AcceptResult != k_EResultOK)
 			{
-				UE_LOG(LogMinderaNet, Error, TEXT("[Driver] AcceptConnection failed (%d) for conn=%u"), (int32)AcceptResult, hConn);
+				UE_LOG(LogMinderaNet, Error, TEXT("[UMinderaNetDriver] AcceptConnection failed (%d) for conn=%u"), (int32)AcceptResult, hConn);
 				Sockets->CloseConnection(hConn, 0, "AcceptConnection failed", false);
 				break;
 			}
@@ -505,7 +505,7 @@ void UMinderaNetDriver::OnConnectionStatusChanged(SteamNetConnectionStatusChange
 			// Store the mapping so InitRemoteConnection can set the Steam handle later
 			PendingSteamConnections.Add(hConn, pInfo->m_info.m_identityRemote);
 
-			UE_LOG(LogMinderaNet, Log, TEXT("[Driver] ACCEPTED Steam connection from SteamID %llu (conn=%u), waiting for UE handshake"),
+			UE_LOG(LogMinderaNet, Log, TEXT("[UMinderaNetDriver] ACCEPTED Steam connection from SteamID %llu (conn=%u), waiting for UE handshake"),
 				pInfo->m_info.m_identityRemote.GetSteamID64(), hConn);
 		}
 		break;
@@ -517,20 +517,20 @@ void UMinderaNetDriver::OnConnectionStatusChanged(SteamNetConnectionStatusChange
 		UMinderaNetConnection* SrvConn = Cast<UMinderaNetConnection>(ServerConnection);
 		if (SrvConn && SrvConn->SteamConnectionHandle == hConn)
 		{
-			UE_LOG(LogMinderaNet, Log, TEXT("[Driver] Server connection OPEN (handle=%u)"), hConn);
+			UE_LOG(LogMinderaNet, Log, TEXT("[UMinderaNetDriver] Server connection OPEN (handle=%u)"), hConn);
 			SrvConn->SetConnectionState(USOCK_Open);
 		}
 		// Server-side: Steam handshake done. The UE connection may or may not exist yet
 		// (created by the connectionless handshake flow). If it exists, ensure it's aware.
 		// No explicit action needed — the UE handshake drives connection state.
-		UE_LOG(LogMinderaNet, Log, TEXT("[Driver] Steam handshake completed for conn=%u"), hConn);
+		UE_LOG(LogMinderaNet, Log, TEXT("[UMinderaNetDriver] Steam handshake completed for conn=%u"), hConn);
 		break;
 	}
 
 	case k_ESteamNetworkingConnectionState_ClosedByPeer:
 	case k_ESteamNetworkingConnectionState_ProblemDetectedLocally:
 	{
-		UE_LOG(LogMinderaNet, Warning, TEXT("[Driver] Connection LOST: conn=%u (state=%d, reason=%d, debug='%s')"),
+		UE_LOG(LogMinderaNet, Warning, TEXT("[UMinderaNetDriver] Connection LOST: conn=%u (state=%d, reason=%d, debug='%s')"),
 			hConn, (int32)NewState, pInfo->m_info.m_eEndReason, UTF8_TO_TCHAR(pInfo->m_info.m_szEndDebug));
 
 		// Steam API requires CloseConnection to free resources on ClosedByPeer/ProblemDetectedLocally.

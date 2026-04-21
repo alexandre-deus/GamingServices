@@ -73,5 +73,4 @@ public:
 private:
 	class FSteamworksGamingServiceImpl;
 	TUniquePtr<FSteamworksGamingServiceImpl> Impl;
-	bool bSocketSubsystemEnabled = false;
 };
