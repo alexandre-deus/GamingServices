@@ -265,36 +265,63 @@ void UMinderaNetDriver::LowLevelSend(TSharedPtr<const FInternetAddr> Address, vo
 		return;
 	}
 
-	UE_LOG(LogMinderaNet, VeryVerbose, TEXT("[UMinderaNetDriver] LowLevelSend: %d bits (%d bytes) to %s"),
-		CountBits, DataLen, *Address->ToString(true));
+	UE_LOG(LogMinderaNet, VeryVerbose, TEXT("[UMinderaNetDriver] LowLevelSend: %d bits (%d bytes) to %s (ClientConnections=%d, ServerConnection=%s)"),
+		CountBits, DataLen, *Address->ToString(true), ClientConnections.Num(), ServerConnection ? TEXT("valid") : TEXT("null"));
 
 	// Search client connections for a matching address
+	int32 ClientSearchIdx = 0;
 	for (UNetConnection* ClientConn : ClientConnections)
 	{
 		UMinderaNetConnection* MC = Cast<UMinderaNetConnection>(ClientConn);
-		if (MC && MC->SteamConnectionHandle != k_HSteamNetConnection_Invalid && MC->RemoteAddr.IsValid() && *MC->RemoteAddr == *Address)
+		if (!MC)
 		{
+			UE_LOG(LogMinderaNet, VeryVerbose, TEXT("[UMinderaNetDriver] LowLevelSend: ClientConnections[%d] is not a UMinderaNetConnection, skipping"), ClientSearchIdx);
+			++ClientSearchIdx;
+			continue;
+		}
+		const bool bHandleValid = MC->SteamConnectionHandle != k_HSteamNetConnection_Invalid;
+		const bool bAddrValid   = MC->RemoteAddr.IsValid();
+		const bool bAddrMatch   = bAddrValid && *MC->RemoteAddr == *Address;
+		UE_LOG(LogMinderaNet, VeryVerbose, TEXT("[UMinderaNetDriver] LowLevelSend: ClientConnections[%d] handle=%u handleValid=%d addrValid=%d addrMatch=%d remoteAddr=%s"),
+			ClientSearchIdx, MC->SteamConnectionHandle, (int32)bHandleValid, (int32)bAddrValid, (int32)bAddrMatch,
+			bAddrValid ? *MC->RemoteAddr->ToString(true) : TEXT("(none)"));
+		if (bHandleValid && bAddrMatch)
+		{
+			UE_LOG(LogMinderaNet, VeryVerbose, TEXT("[UMinderaNetDriver] LowLevelSend: matched ClientConnections[%d] handle=%u, sending %d bytes"), ClientSearchIdx, MC->SteamConnectionHandle, DataLen);
 			Sockets->SendMessageToConnection(MC->SteamConnectionHandle, Data, static_cast<uint32>(DataLen),
 				k_nSteamNetworkingSend_UnreliableNoNagle, nullptr);
 			return;
 		}
+		++ClientSearchIdx;
 	}
+	UE_LOG(LogMinderaNet, VeryVerbose, TEXT("[UMinderaNetDriver] LowLevelSend: no match in %d ClientConnections"), ClientConnections.Num());
 
 	// Check server connection
 	if (ServerConnection)
 	{
 		UMinderaNetConnection* SrvConn = Cast<UMinderaNetConnection>(ServerConnection);
-		if (SrvConn && SrvConn->SteamConnectionHandle != k_HSteamNetConnection_Invalid)
+		if (SrvConn)
 		{
-			Sockets->SendMessageToConnection(SrvConn->SteamConnectionHandle, Data, static_cast<uint32>(DataLen),
-				k_nSteamNetworkingSend_UnreliableNoNagle, nullptr);
-			return;
+			const bool bHandleValid = SrvConn->SteamConnectionHandle != k_HSteamNetConnection_Invalid;
+			UE_LOG(LogMinderaNet, VeryVerbose, TEXT("[UMinderaNetDriver] LowLevelSend: checking ServerConnection handle=%u handleValid=%d"), SrvConn->SteamConnectionHandle, (int32)bHandleValid);
+			if (bHandleValid)
+			{
+				UE_LOG(LogMinderaNet, VeryVerbose, TEXT("[UMinderaNetDriver] LowLevelSend: matched ServerConnection handle=%u, sending %d bytes"), SrvConn->SteamConnectionHandle, DataLen);
+				Sockets->SendMessageToConnection(SrvConn->SteamConnectionHandle, Data, static_cast<uint32>(DataLen),
+					k_nSteamNetworkingSend_UnreliableNoNagle, nullptr);
+				return;
+			}
+		}
+		else
+		{
+			UE_LOG(LogMinderaNet, Warning, TEXT("[UMinderaNetDriver] LowLevelSend: ServerConnection exists but is not a UMinderaNetConnection"));
 		}
 	}
 
 	// Fallback: check PendingSteamConnections for pre-handshake connections.
 	// During the UE connectionless handshake, no UNetConnection exists yet but we
 	// still need to send challenge responses back to the client via the Steam handle.
+	UE_LOG(LogMinderaNet, VeryVerbose, TEXT("[UMinderaNetDriver] LowLevelSend: checking PendingSteamConnections (%d entries) for %s"), PendingSteamConnections.Num(), *Address->ToString(true));
 	const FInternetAddrMindera* SteamAddr = static_cast<const FInternetAddrMindera*>(Address.Get());
 	if (SteamAddr)
 	{
@@ -303,14 +330,22 @@ void UMinderaNetDriver::LowLevelSend(TSharedPtr<const FInternetAddr> Address, vo
 		HSteamNetConnection Handle = FindSteamHandleForIdentity(Identity);
 		if (Handle != k_HSteamNetConnection_Invalid)
 		{
-			UE_LOG(LogMinderaNet, Verbose, TEXT("[UMinderaNetDriver] LowLevelSend: using pending handle=%u for %s"), Handle, *Address->ToString(true));
+			UE_LOG(LogMinderaNet, Verbose, TEXT("[UMinderaNetDriver] LowLevelSend: found pending handle=%u for %s, sending %d bytes"), Handle, *Address->ToString(true), DataLen);
 			Sockets->SendMessageToConnection(Handle, Data, static_cast<uint32>(DataLen),
 				k_nSteamNetworkingSend_UnreliableNoNagle, nullptr);
 			return;
 		}
+		else
+		{
+			UE_LOG(LogMinderaNet, Verbose, TEXT("[UMinderaNetDriver] LowLevelSend: SteamID %llu not found in PendingSteamConnections"), SteamAddr->GetSteamID64());
+		}
+	}
+	else
+	{
+		UE_LOG(LogMinderaNet, Warning, TEXT("[UMinderaNetDriver] LowLevelSend: address is not FInternetAddrMindera, cannot search PendingSteamConnections"));
 	}
 
-	UE_LOG(LogMinderaNet, Warning, TEXT("[UMinderaNetDriver] LowLevelSend: no matching connection for %s, dropping %d bytes"), *Address->ToString(true), DataLen);
+	UE_LOG(LogMinderaNet, Warning, TEXT("[UMinderaNetDriver] LowLevelSend: no matching connection for %s, dropping %d bytes (ClientConnections=%d, PendingConnections=%d)"), *Address->ToString(true), DataLen, ClientConnections.Num(), PendingSteamConnections.Num());
 }
 
 // ---------------------------------------------------------------------------
@@ -351,20 +386,37 @@ void UMinderaNetDriver::TickDispatch(float DeltaTime)
 	if (ServerConnection)
 	{
 		UMinderaNetConnection* SteamConn = Cast<UMinderaNetConnection>(ServerConnection);
-		if (SteamConn && SteamConn->SteamConnectionHandle != k_HSteamNetConnection_Invalid)
+		if (SteamConn)
 		{
-			constexpr int32 MaxMessages = 256;
-			SteamNetworkingMessage_t* IncomingMessages[MaxMessages];
-			const int32 MsgCount = Sockets->ReceiveMessagesOnConnection(
-				SteamConn->SteamConnectionHandle, IncomingMessages, MaxMessages);
-
-			for (int32 i = 0; i < MsgCount; ++i)
+			const bool bHandleValid = SteamConn->SteamConnectionHandle != k_HSteamNetConnection_Invalid;
+			UE_LOG(LogMinderaNet, VeryVerbose, TEXT("[UMinderaNetDriver] TickDispatch: ServerConnection handle=%u handleValid=%d"), SteamConn->SteamConnectionHandle, (int32)bHandleValid);
+			if (bHandleValid)
 			{
-				SteamNetworkingMessage_t* Msg = IncomingMessages[i];
-				UE_LOG(LogMinderaNet, VeryVerbose, TEXT("[UMinderaNetDriver] TickDispatch: client received %d bytes from server"), Msg->m_cbSize);
-				SteamConn->ReceivedRawPacket(const_cast<uint8*>(static_cast<const uint8*>(Msg->m_pData)), Msg->m_cbSize);
-				Msg->Release();
+				constexpr int32 MaxMessages = 256;
+				SteamNetworkingMessage_t* IncomingMessages[MaxMessages];
+				const int32 MsgCount = Sockets->ReceiveMessagesOnConnection(
+					SteamConn->SteamConnectionHandle, IncomingMessages, MaxMessages);
+
+				if (MsgCount < 0)
+				{
+					UE_LOG(LogMinderaNet, Error, TEXT("[UMinderaNetDriver] TickDispatch: ReceiveMessagesOnConnection returned %d (handle=%u may be invalid)"), MsgCount, SteamConn->SteamConnectionHandle);
+				}
+				else if (MsgCount > 0)
+				{
+					UE_LOG(LogMinderaNet, VeryVerbose, TEXT("[UMinderaNetDriver] TickDispatch: received %d message(s) from server (handle=%u)"), MsgCount, SteamConn->SteamConnectionHandle);
+					for (int32 i = 0; i < MsgCount; ++i)
+					{
+						SteamNetworkingMessage_t* Msg = IncomingMessages[i];
+						UE_LOG(LogMinderaNet, VeryVerbose, TEXT("[UMinderaNetDriver] TickDispatch: dispatching message[%d/%d]: %d bytes from server"), i + 1, MsgCount, Msg->m_cbSize);
+						SteamConn->ReceivedRawPacket(const_cast<uint8*>(static_cast<const uint8*>(Msg->m_pData)), Msg->m_cbSize);
+						Msg->Release();
+					}
+				}
 			}
+		}
+		else
+		{
+			UE_LOG(LogMinderaNet, Warning, TEXT("[UMinderaNetDriver] TickDispatch: ServerConnection is not a UMinderaNetConnection"));
 		}
 	}
 }
@@ -404,6 +456,18 @@ void UMinderaNetDriver::Shutdown()
 					Sockets->FlushMessagesOnConnection(SrvConn->SteamConnectionHandle);
 				}
 			}
+
+			// Explicitly close all pending Steam connections before destroying the listen socket.
+			// CloseListenSocket does NOT close accepted connections — it orphans them. The relay
+			// then sees a live connection with no server endpoint and sends reason=5010
+			// ("Relay received unexpected noconnection packet") to the client instead of a
+			// clean ClosedByPeer. Closing them first gives the client a proper disconnect signal.
+			for (const auto& Pair : PendingSteamConnections)
+			{
+				UE_LOG(LogMinderaNet, Log, TEXT("[UMinderaNetDriver] Shutdown: closing pending conn=%u before listen socket destruction"), Pair.Key);
+				Sockets->CloseConnection(Pair.Key, k_ESteamNetConnectionEnd_App_Generic, "Server shutting down", false);
+			}
+			PendingSteamConnections.Empty();
 		}
 		else
 		{
@@ -411,17 +475,19 @@ void UMinderaNetDriver::Shutdown()
 		}
 	}
 
-	if (sActiveCallbackDriver == this)
-	{
-		UE_LOG(LogMinderaNet, Verbose, TEXT("[UMinderaNetDriver] Shutdown: clearing sActiveCallbackDriver"));
-		sActiveCallbackDriver = nullptr;
-	}
-
 	if (SteamSocket)
 	{
 		UE_LOG(LogMinderaNet, Verbose, TEXT("[UMinderaNetDriver] Shutdown: deleting SteamSocket (handle=%u, listen=%d)"),
 			SteamSocket->GetInternalHandle(), (int32)SteamSocket->IsListenSocket());
 		SteamSocket.Reset();
+	}
+
+	// Clear the callback driver AFTER socket destruction so that any synchronous callbacks
+	// fired during CloseListenSocket are still routed correctly.
+	if (sActiveCallbackDriver == this)
+	{
+		UE_LOG(LogMinderaNet, Verbose, TEXT("[UMinderaNetDriver] Shutdown: clearing sActiveCallbackDriver"));
+		sActiveCallbackDriver = nullptr;
 	}
 
 	UE_LOG(LogMinderaNet, Verbose, TEXT("[UMinderaNetDriver] Shutdown: calling Super::Shutdown"));
@@ -488,25 +554,39 @@ void UMinderaNetDriver::OnConnectionStatusChanged(SteamNetConnectionStatusChange
 		// → RecvFrom → connectionless handshake → engine creates the connection after handshake.
 		if (SteamSocket && SteamSocket->IsListenSocket())
 		{
+			UE_LOG(LogMinderaNet, Log, TEXT("[UMinderaNetDriver] Incoming connection request: conn=%u SteamID=%llu, calling AcceptConnection"),
+				hConn, pInfo->m_info.m_identityRemote.GetSteamID64());
+
 			EResult AcceptResult = Sockets->AcceptConnection(hConn);
 			if (AcceptResult != k_EResultOK)
 			{
-				UE_LOG(LogMinderaNet, Error, TEXT("[UMinderaNetDriver] AcceptConnection failed (%d) for conn=%u"), (int32)AcceptResult, hConn);
+				UE_LOG(LogMinderaNet, Error, TEXT("[UMinderaNetDriver] AcceptConnection failed (result=%d) for conn=%u SteamID=%llu, closing connection"),
+					(int32)AcceptResult, hConn, pInfo->m_info.m_identityRemote.GetSteamID64());
 				Sockets->CloseConnection(hConn, 0, "AcceptConnection failed", false);
 				break;
 			}
+			UE_LOG(LogMinderaNet, Log, TEXT("[UMinderaNetDriver] AcceptConnection succeeded for conn=%u"), hConn);
 
 			// Add to poll group so RecvFrom on SteamSocket picks up messages
-			if (SteamSocket->GetPollGroup() != k_HSteamNetPollGroup_Invalid)
+			const HSteamNetPollGroup PollGroup = SteamSocket->GetPollGroup();
+			if (PollGroup != k_HSteamNetPollGroup_Invalid)
 			{
-				Sockets->SetConnectionPollGroup(hConn, SteamSocket->GetPollGroup());
+				Sockets->SetConnectionPollGroup(hConn, PollGroup);
+				UE_LOG(LogMinderaNet, Verbose, TEXT("[UMinderaNetDriver] Added conn=%u to poll group=%u"), hConn, PollGroup);
+			}
+			else
+			{
+				UE_LOG(LogMinderaNet, Warning, TEXT("[UMinderaNetDriver] Poll group is invalid, conn=%u will not be polled via RecvFrom"), hConn);
 			}
 
 			// Store the mapping so InitRemoteConnection can set the Steam handle later
 			PendingSteamConnections.Add(hConn, pInfo->m_info.m_identityRemote);
-
-			UE_LOG(LogMinderaNet, Log, TEXT("[UMinderaNetDriver] ACCEPTED Steam connection from SteamID %llu (conn=%u), waiting for UE handshake"),
-				pInfo->m_info.m_identityRemote.GetSteamID64(), hConn);
+			UE_LOG(LogMinderaNet, Log, TEXT("[UMinderaNetDriver] ACCEPTED Steam connection from SteamID=%llu (conn=%u); PendingSteamConnections now has %d entries, waiting for UE handshake"),
+				pInfo->m_info.m_identityRemote.GetSteamID64(), hConn, PendingSteamConnections.Num());
+		}
+		else
+		{
+			UE_LOG(LogMinderaNet, Verbose, TEXT("[UMinderaNetDriver] Connecting state for conn=%u but not a listen socket (client outbound), ignoring"), hConn);
 		}
 		break;
 	}
@@ -517,39 +597,58 @@ void UMinderaNetDriver::OnConnectionStatusChanged(SteamNetConnectionStatusChange
 		UMinderaNetConnection* SrvConn = Cast<UMinderaNetConnection>(ServerConnection);
 		if (SrvConn && SrvConn->SteamConnectionHandle == hConn)
 		{
-			UE_LOG(LogMinderaNet, Log, TEXT("[UMinderaNetDriver] Server connection OPEN (handle=%u)"), hConn);
+			UE_LOG(LogMinderaNet, Log, TEXT("[UMinderaNetDriver] Server connection OPEN (handle=%u), promoting USOCK_Pending -> USOCK_Open"), hConn);
 			SrvConn->SetConnectionState(USOCK_Open);
+		}
+		else if (SrvConn)
+		{
+			UE_LOG(LogMinderaNet, Verbose, TEXT("[UMinderaNetDriver] Connected callback for conn=%u but ServerConnection has handle=%u (mismatch or server-side)"), hConn, SrvConn->SteamConnectionHandle);
 		}
 		// Server-side: Steam handshake done. The UE connection may or may not exist yet
 		// (created by the connectionless handshake flow). If it exists, ensure it's aware.
 		// No explicit action needed — the UE handshake drives connection state.
-		UE_LOG(LogMinderaNet, Log, TEXT("[UMinderaNetDriver] Steam handshake completed for conn=%u"), hConn);
+		UE_LOG(LogMinderaNet, Log, TEXT("[UMinderaNetDriver] Steam P2P handshake completed for conn=%u (PendingSteamConnections=%d, ClientConnections=%d)"),
+			hConn, PendingSteamConnections.Num(), ClientConnections.Num());
 		break;
 	}
 
 	case k_ESteamNetworkingConnectionState_ClosedByPeer:
 	case k_ESteamNetworkingConnectionState_ProblemDetectedLocally:
 	{
-		UE_LOG(LogMinderaNet, Warning, TEXT("[UMinderaNetDriver] Connection LOST: conn=%u (state=%d, reason=%d, debug='%s')"),
-			hConn, (int32)NewState, pInfo->m_info.m_eEndReason, UTF8_TO_TCHAR(pInfo->m_info.m_szEndDebug));
+		const TCHAR* StateStr = (NewState == k_ESteamNetworkingConnectionState_ClosedByPeer) ? TEXT("ClosedByPeer") : TEXT("ProblemDetectedLocally");
+		UE_LOG(LogMinderaNet, Warning, TEXT("[UMinderaNetDriver] Connection LOST [%s]: conn=%u reason=%d debug='%s'"),
+			StateStr, hConn, pInfo->m_info.m_eEndReason, UTF8_TO_TCHAR(pInfo->m_info.m_szEndDebug));
 
 		// Steam API requires CloseConnection to free resources on ClosedByPeer/ProblemDetectedLocally.
 		// Close it here immediately, then invalidate the handle on the UE connection so that
 		// UMinderaNetConnection::CleanUp() (called later during GC) does not double-close.
 		Sockets->CloseConnection(hConn, 0, nullptr, false);
+		UE_LOG(LogMinderaNet, Verbose, TEXT("[UMinderaNetDriver] Steam CloseConnection called for conn=%u"), hConn);
 
 		// Remove from pending map if the UE connection was never created
-		PendingSteamConnections.Remove(hConn);
+		const int32 PendingRemoved = PendingSteamConnections.Remove(hConn);
+		if (PendingRemoved > 0)
+		{
+			UE_LOG(LogMinderaNet, Log, TEXT("[UMinderaNetDriver] Removed conn=%u from PendingSteamConnections (was pre-handshake); remaining=%d"), hConn, PendingSteamConnections.Num());
+		}
 
+		bool bFoundInClientConnections = false;
 		for (int32 i = ClientConnections.Num() - 1; i >= 0; --i)
 		{
 			UMinderaNetConnection* MC = Cast<UMinderaNetConnection>(ClientConnections[i]);
 			if (MC && MC->SteamConnectionHandle == hConn)
 			{
+				UE_LOG(LogMinderaNet, Log, TEXT("[UMinderaNetDriver] Closing ClientConnections[%d] (handle=%u) due to %s"), i, hConn, StateStr);
 				MC->SteamConnectionHandle = k_HSteamNetConnection_Invalid;
 				MC->Close();
+				bFoundInClientConnections = true;
 				break;
 			}
+		}
+
+		if (!bFoundInClientConnections)
+		{
+			UE_LOG(LogMinderaNet, Verbose, TEXT("[UMinderaNetDriver] conn=%u not found in ClientConnections (%d entries), checking ServerConnection"), hConn, ClientConnections.Num());
 		}
 
 		if (ServerConnection)
@@ -557,15 +656,38 @@ void UMinderaNetDriver::OnConnectionStatusChanged(SteamNetConnectionStatusChange
 			UMinderaNetConnection* SrvConn = Cast<UMinderaNetConnection>(ServerConnection);
 			if (SrvConn && SrvConn->SteamConnectionHandle == hConn)
 			{
+				UE_LOG(LogMinderaNet, Log, TEXT("[UMinderaNetDriver] Closing ServerConnection (handle=%u) due to %s"), hConn, StateStr);
 				SrvConn->SteamConnectionHandle = k_HSteamNetConnection_Invalid;
 				SrvConn->Close();
 			}
+			else if (SrvConn)
+			{
+				UE_LOG(LogMinderaNet, Verbose, TEXT("[UMinderaNetDriver] ServerConnection handle=%u does not match lost conn=%u, not closing"), SrvConn->SteamConnectionHandle, hConn);
+			}
+		}
+
+		if (!bFoundInClientConnections && PendingRemoved == 0 && !ServerConnection)
+		{
+			UE_LOG(LogMinderaNet, Warning, TEXT("[UMinderaNetDriver] conn=%u not found in any tracked connection (ClientConnections=%d, PendingSteamConnections=%d, ServerConnection=null)"),
+				hConn, ClientConnections.Num(), PendingSteamConnections.Num());
 		}
 
 		break;
 	}
 
+	case k_ESteamNetworkingConnectionState_None:
+	{
+		// Connection fully destroyed. The Steam SDK requires a CloseConnection call here
+		// to acknowledge the notification and release the handle. This arrives for connections
+		// that belonged to a previous listen socket (e.g. during map travel) when the new
+		// driver's RunCallbacks processes the deferred cleanup.
+		Sockets->CloseConnection(hConn, 0, nullptr, false);
+		PendingSteamConnections.Remove(hConn);
+		break;
+	}
+
 	default:
+		UE_LOG(LogMinderaNet, Verbose, TEXT("[UMinderaNetDriver] Unhandled connection state %d for conn=%u"), (int32)NewState, hConn);
 		break;
 	}
 }
@@ -573,12 +695,19 @@ void UMinderaNetDriver::OnConnectionStatusChanged(SteamNetConnectionStatusChange
 // ---------------------------------------------------------------------------
 HSteamNetConnection UMinderaNetDriver::FindSteamHandleForIdentity(const SteamNetworkingIdentity& Identity) const
 {
+	UE_LOG(LogMinderaNet, VeryVerbose, TEXT("[UMinderaNetDriver] FindSteamHandleForIdentity: searching for SteamID=%llu in %d pending entries"),
+		Identity.GetSteamID64(), PendingSteamConnections.Num());
+
 	for (const auto& Pair : PendingSteamConnections)
 	{
 		if (Pair.Value == Identity)
 		{
+			UE_LOG(LogMinderaNet, VeryVerbose, TEXT("[UMinderaNetDriver] FindSteamHandleForIdentity: found handle=%u for SteamID=%llu"),
+				Pair.Key, Identity.GetSteamID64());
 			return Pair.Key;
 		}
 	}
+
+	UE_LOG(LogMinderaNet, VeryVerbose, TEXT("[UMinderaNetDriver] FindSteamHandleForIdentity: SteamID=%llu not found in pending connections"), Identity.GetSteamID64());
 	return k_HSteamNetConnection_Invalid;
 }
