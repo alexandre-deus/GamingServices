@@ -172,6 +172,7 @@ public class GamingServices : ModuleRules
     {
         Steamworks,
         EpicOnlineServices,
+        Null,
     }
 
     public GamingServices(ReadOnlyTargetRules Target) : base(Target)

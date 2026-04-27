@@ -1,5 +1,7 @@
 // Copyright Mindera. All Rights Reserved.
 
+#ifdef USE_STEAMWORKS
+
 #include "NetDriver/MinderaSocket.h"
 #include "NetDriver/MinderaSocketSubsystem.h"
 
@@ -567,3 +569,5 @@ int32 FMinderaSocket::GetPortNo()
 	UE_LOG(LogMinderaSocket, VeryVerbose, TEXT("[Socket] GetPortNo: %d"), Port);
 	return Port;
 }
+
+#endif

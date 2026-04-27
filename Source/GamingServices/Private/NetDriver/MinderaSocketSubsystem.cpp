@@ -1,5 +1,7 @@
 // Copyright Mindera. All Rights Reserved.
 
+#ifdef USE_STEAMWORKS
+
 #include "NetDriver/MinderaSocketSubsystem.h"
 #include "NetDriver/MinderaSocket.h"
 #include "SocketSubsystemModule.h"
@@ -249,3 +251,5 @@ bool FMinderaSocketSubsystem::Tick(float DeltaTime)
 {
 	return true;
 }
+
+#endif

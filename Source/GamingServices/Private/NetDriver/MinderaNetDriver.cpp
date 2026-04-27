@@ -1,5 +1,7 @@
 // Copyright Mindera. All Rights Reserved.
 
+#ifdef USE_STEAMWORKS
+
 #include "NetDriver/MinderaNetDriver.h"
 #include "NetDriver/MinderaNetConnection.h"
 #include "NetDriver/MinderaSocket.h"
@@ -711,3 +713,5 @@ HSteamNetConnection UMinderaNetDriver::FindSteamHandleForIdentity(const SteamNet
 	UE_LOG(LogMinderaNet, VeryVerbose, TEXT("[UMinderaNetDriver] FindSteamHandleForIdentity: SteamID=%llu not found in pending connections"), Identity.GetSteamID64());
 	return k_HSteamNetConnection_Invalid;
 }
+
+#endif

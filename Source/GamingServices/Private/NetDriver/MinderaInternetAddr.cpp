@@ -1,5 +1,7 @@
 // Copyright Mindera. All Rights Reserved.
 
+#ifdef USE_STEAMWORKS
+
 #include "NetDriver/MinderaInternetAddr.h"
 
 #include "steam/isteamnetworkingutils.h"
@@ -268,3 +270,5 @@ FInternetAddrMindera::operator const SteamNetworkingIPAddr() const
 	}
 	return *IPAddr;
 }
+
+#endif

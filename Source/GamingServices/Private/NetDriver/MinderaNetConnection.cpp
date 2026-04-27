@@ -1,5 +1,7 @@
 // Copyright Mindera. All Rights Reserved.
 
+#ifdef USE_STEAMWORKS
+
 #include "NetDriver/MinderaNetConnection.h"
 #include "NetDriver/MinderaNetDriver.h"
 #include "NetDriver/MinderaInternetAddr.h"
@@ -162,3 +164,5 @@ void UMinderaNetConnection::CleanUp()
 		SteamConnectionHandle = k_HSteamNetConnection_Invalid;
 	}
 }
+
+#endif
