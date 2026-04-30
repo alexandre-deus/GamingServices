@@ -143,6 +143,21 @@ bool UGamingServicesSubsystem::NeedsLogin() const
 	return Service->NeedsLogin();
 }
 
+FString UGamingServicesSubsystem::GetUserId() const
+{
+	return Service->GetUserId();
+}
+
+FString UGamingServicesSubsystem::GetDisplayName() const
+{
+	return Service->GetDisplayName();
+}
+
+UTexture2D* UGamingServicesSubsystem::GetAvatar() const
+{
+	return Service->GetAvatar();
+}
+
 void UGamingServicesSubsystem::WriteFile(const FString& FilePath, const TArray<uint8>& Data)
 {
 	Service->WriteFile(FilePath, Data, [this](const FGamingServiceResult& R)

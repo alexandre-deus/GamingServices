@@ -66,6 +66,7 @@ public:
 	virtual bool NeedsLogin() const override;
 	virtual FString GetUserId() const override;
 	virtual FString GetDisplayName() const override;
+	virtual UTexture2D* GetAvatar() const override;
 
 	bool IsSteamRunning() const;
 	bool IsSteamOverlayEnabled() const;

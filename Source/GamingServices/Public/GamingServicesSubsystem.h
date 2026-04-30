@@ -6,6 +6,8 @@
 #include "Services/FGamingService.h"
 #include "GamingServicesSubsystem.generated.h"
 
+class UTexture2D;
+
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGamingLoggedIn, const FGamingServiceResult&, Result);
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGamingAchievementUnlocked, const FGamingServiceResult&, Result);
@@ -172,6 +174,15 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "GamingServices")
 	bool NeedsLogin() const;
+
+	UFUNCTION(BlueprintPure, Category = "GamingServices|User")
+	FString GetUserId() const;
+
+	UFUNCTION(BlueprintPure, Category = "GamingServices|User")
+	FString GetDisplayName() const;
+
+	UFUNCTION(BlueprintPure, Category = "GamingServices|User")
+	UTexture2D* GetAvatar() const;
 
 	UFUNCTION(BlueprintCallable, Category = "GamingServices")
 	void Login(const FGamingServiceLoginParams& Params);

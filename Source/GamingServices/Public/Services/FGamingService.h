@@ -5,6 +5,8 @@
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
 
+class UTexture2D;
+
 class GAMINGSERVICES_API FGamingService
 {
 public:
@@ -81,6 +83,7 @@ public:
 	virtual bool NeedsLogin() const = 0;
 	virtual FString GetUserId() const = 0;
 	virtual FString GetDisplayName() const = 0;
+	virtual UTexture2D* GetAvatar() const = 0;
 	template <class T>
 	T& GetServiceAs() { return *static_cast<T*>(this); 	}
 

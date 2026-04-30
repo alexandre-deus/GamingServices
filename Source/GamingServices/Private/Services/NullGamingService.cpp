@@ -301,3 +301,8 @@ FString FNullGamingService::GetDisplayName() const
 {
 	return TEXT("Null User");
 }
+
+UTexture2D* FNullGamingService::GetAvatar() const
+{
+	return nullptr;
+}

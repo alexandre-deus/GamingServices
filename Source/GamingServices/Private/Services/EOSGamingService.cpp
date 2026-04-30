@@ -2921,6 +2921,13 @@ FString FEOSGamingService::GetDisplayName() const
 	return Impl->GetDisplayName();
 }
 
+UTexture2D* FEOSGamingService::GetAvatar() const
+{
+	// EOS SDK does not expose user avatars natively; fetching them requires the
+	// Epic Games Account REST API which is out of scope for this backend.
+	return nullptr;
+}
+
 void FEOSGamingService::SetTempStoragePath(const FString& InPath)
 {
 	Impl->SetTempStoragePath(InPath);
