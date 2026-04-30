@@ -184,6 +184,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "GamingServices|User")
 	UTexture2D* GetAvatar() const;
 
+	UFUNCTION(BlueprintPure, Category = "GamingServices|User")
+	UTexture2D* GetAvatarByUserId(const FString& UserId) const;
+
 	UFUNCTION(BlueprintCallable, Category = "GamingServices")
 	void Login(const FGamingServiceLoginParams& Params);
 

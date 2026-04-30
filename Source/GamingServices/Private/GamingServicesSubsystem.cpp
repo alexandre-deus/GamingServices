@@ -158,6 +158,11 @@ UTexture2D* UGamingServicesSubsystem::GetAvatar() const
 	return Service->GetAvatar();
 }
 
+UTexture2D* UGamingServicesSubsystem::GetAvatarByUserId(const FString& UserId) const
+{
+	return Service->GetAvatarByUserId(UserId);
+}
+
 void UGamingServicesSubsystem::WriteFile(const FString& FilePath, const TArray<uint8>& Data)
 {
 	Service->WriteFile(FilePath, Data, [this](const FGamingServiceResult& R)

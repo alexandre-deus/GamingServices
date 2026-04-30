@@ -61,7 +61,8 @@ public:
 		bIsLoggedIn = false;
 		UserId.Empty();
 		DisplayName.Empty();
-		CachedAvatar.Reset();
+		AvatarCache.Empty();
+		RequestedAvatars.Empty();
 
 		UE_LOG(LogTemp, Log, TEXT("SteamworksGamingService: Shutdown completed"));
 	}
@@ -681,26 +682,22 @@ public:
 
 	UTexture2D* GetAvatar()
 	{
-		if (CachedAvatar.IsValid())
-		{
-			return CachedAvatar.Get();
-		}
-		if (!bIsLoggedIn || !SteamUser || !SteamFriends || !SteamUtils)
+		if (!bIsLoggedIn || !SteamUser)
 		{
 			return nullptr;
 		}
+		return GetAvatarForSteamID(SteamUser->GetSteamID());
+	}
 
-		const CSteamID SteamID = SteamUser->GetSteamID();
-		const int AvatarHandle = SteamFriends->GetLargeFriendAvatar(SteamID);
-		if (AvatarHandle <= 0)
+	UTexture2D* GetAvatarByUserId(const FString& InUserId)
+	{
+		const uint64 SteamID64 = FCString::Strtoui64(*InUserId, nullptr, 10);
+		if (SteamID64 == 0)
 		{
-			// 0 = not yet loaded (Steam will fire AvatarImageLoaded_t),
-			// -1 = no avatar set for this user.
+			UE_LOG(LogTemp, Warning, TEXT("SteamworksGamingService: GetAvatarByUserId called with invalid UserId '%s'"), *InUserId);
 			return nullptr;
 		}
-
-		BuildAvatarFromHandle(AvatarHandle);
-		return CachedAvatar.Get();
+		return GetAvatarForSteamID(CSteamID(SteamID64));
 	}
 
 	bool IsSteamRunning() const { return SteamAPI_IsSteamRunning(); }
@@ -1260,7 +1257,8 @@ private:
 	CCallback<FSteamworksGamingServiceImpl, GameLobbyJoinRequested_t> m_CallbackGameLobbyJoinRequested;
 	CCallback<FSteamworksGamingServiceImpl, AvatarImageLoaded_t> m_CallbackAvatarImageLoaded;
 
-	TStrongObjectPtr<UTexture2D> CachedAvatar;
+	TMap<uint64, TStrongObjectPtr<UTexture2D>> AvatarCache;
+	TSet<uint64> RequestedAvatars;
 
 	FCriticalSection CallbackCriticalSection;
 
@@ -1306,15 +1304,58 @@ private:
 
 	void OnAvatarImageLoaded(AvatarImageLoaded_t* pParam)
 	{
-		if (!SteamUser || pParam->m_steamID != SteamUser->GetSteamID())
+		const uint64 SteamID64 = pParam->m_steamID.ConvertToUint64();
+		// Only react to users we've explicitly requested (or already cached); avoids building
+		// textures for unrelated avatars Steam happens to load (e.g. friend list portraits).
+		if (!RequestedAvatars.Contains(SteamID64) && !AvatarCache.Contains(SteamID64))
 		{
-			// Only react to the local user's avatar; ignore avatars loaded for friends/lobby members.
 			return;
 		}
-		BuildAvatarFromHandle(pParam->m_iImage);
+		BuildAvatarFromHandle(SteamID64, pParam->m_iImage);
 	}
 
-	void BuildAvatarFromHandle(int AvatarHandle)
+	UTexture2D* GetAvatarForSteamID(const CSteamID& SteamID)
+	{
+		if (!SteamFriends || !SteamUtils)
+		{
+			return nullptr;
+		}
+
+		const uint64 SteamID64 = SteamID.ConvertToUint64();
+		if (TStrongObjectPtr<UTexture2D>* Existing = AvatarCache.Find(SteamID64))
+		{
+			if (Existing->IsValid())
+			{
+				return Existing->Get();
+			}
+		}
+
+		// Make sure persona/avatar info is queued for download for non-friend users.
+		// Returns false if the data is already available, true if a request was started.
+		SteamFriends->RequestUserInformation(SteamID, /*bRequireNameOnly=*/false);
+
+		const int AvatarHandle = SteamFriends->GetLargeFriendAvatar(SteamID);
+		if (AvatarHandle == 0)
+		{
+			// Not loaded yet — Steam will fire AvatarImageLoaded_t when ready.
+			RequestedAvatars.Add(SteamID64);
+			return nullptr;
+		}
+		if (AvatarHandle < 0)
+		{
+			// User has no avatar set.
+			return nullptr;
+		}
+
+		BuildAvatarFromHandle(SteamID64, AvatarHandle);
+		if (TStrongObjectPtr<UTexture2D>* Built = AvatarCache.Find(SteamID64))
+		{
+			return Built->Get();
+		}
+		return nullptr;
+	}
+
+	void BuildAvatarFromHandle(uint64 SteamID64, int AvatarHandle)
 	{
 		if (AvatarHandle <= 0 || !SteamUtils)
 		{
@@ -1325,7 +1366,7 @@ private:
 		uint32 Height = 0;
 		if (!SteamUtils->GetImageSize(AvatarHandle, &Width, &Height) || Width == 0 || Height == 0)
 		{
-			UE_LOG(LogTemp, Warning, TEXT("SteamworksGamingService: Failed to get avatar image size"));
+			UE_LOG(LogTemp, Warning, TEXT("SteamworksGamingService: Failed to get avatar image size for %llu"), SteamID64);
 			return;
 		}
 
@@ -1334,7 +1375,7 @@ private:
 		RGBA.SetNumUninitialized(BufferSize);
 		if (!SteamUtils->GetImageRGBA(AvatarHandle, RGBA.GetData(), BufferSize))
 		{
-			UE_LOG(LogTemp, Warning, TEXT("SteamworksGamingService: Failed to read avatar pixel data"));
+			UE_LOG(LogTemp, Warning, TEXT("SteamworksGamingService: Failed to read avatar pixel data for %llu"), SteamID64);
 			return;
 		}
 
@@ -1347,7 +1388,7 @@ private:
 		UTexture2D* Texture = UTexture2D::CreateTransient(static_cast<int32>(Width), static_cast<int32>(Height), PF_B8G8R8A8);
 		if (!Texture)
 		{
-			UE_LOG(LogTemp, Warning, TEXT("SteamworksGamingService: CreateTransient avatar texture failed"));
+			UE_LOG(LogTemp, Warning, TEXT("SteamworksGamingService: CreateTransient avatar texture failed for %llu"), SteamID64);
 			return;
 		}
 		Texture->SRGB = true;
@@ -1358,8 +1399,9 @@ private:
 		Mip.BulkData.Unlock();
 		Texture->UpdateResource();
 
-		CachedAvatar.Reset(Texture);
-		UE_LOG(LogTemp, Log, TEXT("SteamworksGamingService: Avatar loaded (%ux%u)"), Width, Height);
+		AvatarCache.Emplace(SteamID64, TStrongObjectPtr<UTexture2D>(Texture));
+		RequestedAvatars.Remove(SteamID64);
+		UE_LOG(LogTemp, Log, TEXT("SteamworksGamingService: Avatar loaded for %llu (%ux%u)"), SteamID64, Width, Height);
 	}
 
 	void OnGameLobbyJoinRequested(GameLobbyJoinRequested_t* pParam)
@@ -1735,6 +1777,8 @@ FString FSteamworksGamingService::GetUserId() const { return Impl->GetUserId(); 
 FString FSteamworksGamingService::GetDisplayName() const { return Impl->GetDisplayName(); }
 
 UTexture2D* FSteamworksGamingService::GetAvatar() const { return Impl->GetAvatar(); }
+
+UTexture2D* FSteamworksGamingService::GetAvatarByUserId(const FString& UserId) const { return Impl->GetAvatarByUserId(UserId); }
 
 bool FSteamworksGamingService::IsSteamRunning() const { return Impl->IsSteamRunning(); }
 

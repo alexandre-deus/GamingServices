@@ -84,6 +84,7 @@ public:
 	virtual FString GetUserId() const = 0;
 	virtual FString GetDisplayName() const = 0;
 	virtual UTexture2D* GetAvatar() const = 0;
+	virtual UTexture2D* GetAvatarByUserId(const FString& UserId) const = 0;
 	template <class T>
 	T& GetServiceAs() { return *static_cast<T*>(this); 	}
 

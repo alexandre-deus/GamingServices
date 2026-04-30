@@ -306,3 +306,8 @@ UTexture2D* FNullGamingService::GetAvatar() const
 {
 	return nullptr;
 }
+
+UTexture2D* FNullGamingService::GetAvatarByUserId(const FString& UserId) const
+{
+	return nullptr;
+}

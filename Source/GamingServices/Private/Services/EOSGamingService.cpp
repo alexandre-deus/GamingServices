@@ -2928,6 +2928,11 @@ UTexture2D* FEOSGamingService::GetAvatar() const
 	return nullptr;
 }
 
+UTexture2D* FEOSGamingService::GetAvatarByUserId(const FString& UserId) const
+{
+	return nullptr;
+}
+
 void FEOSGamingService::SetTempStoragePath(const FString& InPath)
 {
 	Impl->SetTempStoragePath(InPath);
