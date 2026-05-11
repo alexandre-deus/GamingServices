@@ -2,6 +2,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Delegates/IDelegateInstance.h"
 #include "Modules/ModuleManager.h"
 #include "Services/FGamingService.h"
 
@@ -14,6 +15,9 @@ public:
 	FGamingService& GetService() const { return *Service; }
 
 private:
+	void TearDownPlatform();
+
 	TUniquePtr<FGamingService> Service;
+	FDelegateHandle PreExitHandle;
 	bool bSocketSubsystemEnabled = false;
 };

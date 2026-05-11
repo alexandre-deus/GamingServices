@@ -1,4 +1,6 @@
 #include "GamingServices.h"
+#include "Misc/App.h"
+#include "Misc/CoreDelegates.h"
 #include "Services/EOSGamingService.h"
 #include "Services/SteamworksGamingService.h"
 #include "Services/NullGamingService.h"
@@ -12,41 +14,61 @@ IMPLEMENT_MODULE(FGamingServicesModule, GamingServices)
 
 void FGamingServicesModule::StartupModule()
 {
-	#ifdef USE_EOS
+	// Skip platform SDKs when the editor is running without -game (PIE / normal editor session).
+	// FApp::IsGame() is true for cooked targets AND for the editor binary launched with -game
+	// (i.e. Standalone Game from the editor), false for PIE / regular editor.
+	const bool bUseRealService = FApp::IsGame();
+
+	if (bUseRealService)
+	{
+#ifdef USE_EOS
 		Service = MakeUnique<FEOSGamingService>();
-	#elif defined(USE_STEAMWORKS)
+#elif defined(USE_STEAMWORKS)
 		Service = MakeUnique<FSteamworksGamingService>();
-	#else
+#else
 		Service = MakeUnique<FNullGamingService>();
-	#endif
+#endif
+	}
+	else
+	{
+		Service = MakeUnique<FNullGamingService>();
+	}
 
 	Service->InitializePlatform();
 
 #ifdef USE_STEAMWORKS
-	FMinderaSocketSubsystem* SocketSubsystem = FMinderaSocketSubsystem::Create();
-	if (SocketSubsystem)
+	if (bUseRealService)
 	{
-		FString Error;
-		if (SocketSubsystem->Init(Error))
+		FMinderaSocketSubsystem* SocketSubsystem = FMinderaSocketSubsystem::Create();
+		if (SocketSubsystem)
 		{
-			bSocketSubsystemEnabled = true;
-			FSocketSubsystemModule& SSModule = FModuleManager::LoadModuleChecked<FSocketSubsystemModule>(TEXT("Sockets"));
-			SSModule.RegisterSocketSubsystem(MINDERA_SOCKET_SUBSYSTEM_NAME, SocketSubsystem, false);
-			UE_LOG(LogTemp, Log, TEXT("GamingServices: Registered MinderaSteam socket subsystem"));
-		}
-		else
-		{
-			UE_LOG(LogTemp, Warning, TEXT("GamingServices: Failed to init MinderaSteam socket subsystem: %s"), *Error);
-			FMinderaSocketSubsystem::Destroy();
+			FString Error;
+			if (SocketSubsystem->Init(Error))
+			{
+				bSocketSubsystemEnabled = true;
+				FSocketSubsystemModule& SSModule = FModuleManager::LoadModuleChecked<FSocketSubsystemModule>(TEXT("Sockets"));
+				SSModule.RegisterSocketSubsystem(MINDERA_SOCKET_SUBSYSTEM_NAME, SocketSubsystem, false);
+				UE_LOG(LogTemp, Log, TEXT("GamingServices: Registered MinderaSteam socket subsystem"));
+			}
+			else
+			{
+				UE_LOG(LogTemp, Warning, TEXT("GamingServices: Failed to init MinderaSteam socket subsystem: %s"), *Error);
+				FMinderaSocketSubsystem::Destroy();
+			}
 		}
 	}
 #endif
 
+	// Tear the platform down on engine pre-exit rather than module shutdown.
+	// ShutdownModule runs very late in process teardown; by that point Steam often
+	// can't deliver the "left game" notification cleanly, so the friends list keeps
+	// showing the user as "In-Game" for a long time. OnEnginePreExit fires while
+	// the engine is still alive enough for a clean Steam disconnect.
+	PreExitHandle = FCoreDelegates::OnEnginePreExit.AddRaw(this, &FGamingServicesModule::TearDownPlatform);
 }
 
-void FGamingServicesModule::ShutdownModule()
+void FGamingServicesModule::TearDownPlatform()
 {
-	
 #ifdef USE_STEAMWORKS
 	if (bSocketSubsystemEnabled)
 	{
@@ -67,4 +89,17 @@ void FGamingServicesModule::ShutdownModule()
 		Service->DestroyPlatform();
 		Service.Reset();
 	}
+}
+
+void FGamingServicesModule::ShutdownModule()
+{
+	if (PreExitHandle.IsValid())
+	{
+		FCoreDelegates::OnEnginePreExit.Remove(PreExitHandle);
+		PreExitHandle.Reset();
+	}
+
+	// Safety net: if OnEnginePreExit never fired (e.g. abnormal teardown path),
+	// still tear the platform down here.
+	TearDownPlatform();
 }

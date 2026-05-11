@@ -1682,11 +1682,21 @@ FSteamworksGamingService::~FSteamworksGamingService() {}
 
 void FSteamworksGamingService::InitializePlatform()
 {
-	FString AppId;
-	if (GConfig->GetString(TEXT("GamingServices.Steamworks"), TEXT("AppId"), AppId, GGameIni))
+	int32 AppIdInt = 0;
+	if (!GConfig->GetInt(TEXT("GamingServices.Steamworks"), TEXT("AppId"), AppIdInt, GGameIni) || AppIdInt <= 0)
 	{
-		FPlatformMisc::SetEnvironmentVar(TEXT("SteamAppId"), *AppId);
-		UE_LOG(LogTemp, Log, TEXT("SteamworksGamingService: Set SteamAppId=%s from config"), *AppId);
+		UE_LOG(LogTemp, Error, TEXT("SteamworksGamingService: Missing or invalid [GamingServices.Steamworks] AppId in GameIni; skipping Steam init"));
+		return;
+	}
+
+	const uint32 AppId = static_cast<uint32>(AppIdInt);
+	UE_LOG(LogTemp, Log, TEXT("SteamworksGamingService: AppId=%u from config"), AppId);
+
+	if (SteamAPI_RestartAppIfNecessary(AppId))
+	{
+		UE_LOG(LogTemp, Log, TEXT("SteamworksGamingService: SteamAPI_RestartAppIfNecessary requested relaunch via Steam; exiting"));
+		FPlatformMisc::RequestExit(false);
+		return;
 	}
 
 	Impl->InitializeSteamworks();

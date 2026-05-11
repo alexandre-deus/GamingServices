@@ -236,6 +236,7 @@ public class GamingServices : ModuleRules
                 {
                     Console.WriteLine($"[GamingServices] Steamworks SDK found, configuring...");
                     PublicDefinitions.Add("USE_STEAMWORKS=1");
+                    PublicDefinitions.Add("_CRT_SECURE_NO_WARNINGS");
                     AddSteamworks(Target);
                     bServiceConfigured = true;
                 }
