@@ -106,6 +106,16 @@ bool UMinderaNetDriver::InitConnect(FNetworkNotify* InNotify, const FURL& Connec
 {
 	UE_LOG(LogMinderaNet, Log, TEXT("[UMinderaNetDriver] InitConnect: Host='%s'"), *ConnectURL.Host);
 
+#if WITH_EDITOR
+	// PIE always uses plain IP so local multi-player works without going through the Steam relay.
+	if (GIsEditor)
+	{
+		UE_LOG(LogMinderaNet, Log, TEXT("[UMinderaNetDriver] InitConnect: PIE detected, forcing IP passthrough"));
+		bIsPassthrough = true;
+		return Super::InitConnect(InNotify, ConnectURL, Error);
+	}
+#endif
+
 	ISteamNetworkingSockets* Sockets = GetSteamSocketsInterface();
 	if (!Sockets || !ConnectURL.Host.StartsWith(MinderaSteamURLPrefix))
 	{
@@ -181,11 +191,18 @@ bool UMinderaNetDriver::InitConnect(FNetworkNotify* InNotify, const FURL& Connec
 bool UMinderaNetDriver::InitListen(FNetworkNotify* InNotify, FURL& ListenURL,
 	bool bReuseAddressAndPort, FString& Error)
 {
-	ISteamNetworkingSockets* Sockets = GetSteamSocketsInterface();
-	const bool bForceFallback = ListenURL.HasOption(TEXT("bIsLanMatch")) ||
-		FParse::Param(FCommandLine::Get(), TEXT("forcepassthrough"));
+#if WITH_EDITOR
+	// PIE listen server always uses plain IP so local multi-player works without going through the Steam relay.
+	if (GIsEditor)
+	{
+		UE_LOG(LogMinderaNet, Log, TEXT("[UMinderaNetDriver] InitListen: PIE detected, forcing IP passthrough"));
+		bIsPassthrough = true;
+		return Super::InitListen(InNotify, ListenURL, bReuseAddressAndPort, Error);
+	}
+#endif
 
-	if (!Sockets || bForceFallback)
+	ISteamNetworkingSockets* Sockets = GetSteamSocketsInterface();
+	if (!Sockets)
 	{
 		UE_LOG(LogMinderaNet, Log, TEXT("[UMinderaNetDriver] InitListen: falling back to IP passthrough"));
 		bIsPassthrough = true;
