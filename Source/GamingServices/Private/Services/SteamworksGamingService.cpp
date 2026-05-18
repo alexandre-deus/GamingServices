@@ -1178,7 +1178,7 @@ public:
 	void GetCurrentSession(TFunction<void(const FSessionInfo&)> Callback)
 	{
 		FSessionInfo Info;
-		
+
 		if (bIsInLobby && CurrentLobbyId.IsValid())
 		{
 			const char* LobbyName = SteamMatchmaking->GetLobbyData(CurrentLobbyId, "name");
@@ -1312,6 +1312,16 @@ private:
 			return;
 		}
 		BuildAvatarFromHandle(SteamID64, pParam->m_iImage);
+
+		// Fire OnAvatarReady only here — this is the genuine async completion. The other
+		// caller of BuildAvatarFromHandle is GetAvatarForSteamID, which is a synchronous
+		// "try now" path where the caller already gets the texture as a return value;
+		// firing a ready event from that path would be redundant (and re-entrant from the
+		// caller's perspective).
+		if (Owner->OnAvatarReady && AvatarCache.Contains(SteamID64))
+		{
+			Owner->OnAvatarReady(FString::Printf(TEXT("%llu"), SteamID64));
+		}
 	}
 
 	UTexture2D* GetAvatarForSteamID(const CSteamID& SteamID)

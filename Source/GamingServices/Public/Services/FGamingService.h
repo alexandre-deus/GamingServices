@@ -75,6 +75,9 @@ public:
 	TFunction<void(const FSessionMemberInfo&)> OnSessionUserLeft;
 	TFunction<void(const FGamingServiceResult&)> OnSessionEnded;
 	TFunction<void(const FLobbyInviteAcceptedInfo&)> OnLobbyInviteAccepted;
+	// Fires after the platform finishes asynchronously fetching an avatar texture for UserId.
+	// Game UI can subscribe to refresh stale avatar widgets keyed by user id.
+	TFunction<void(const FString& UserId)> OnAvatarReady;
 
 	virtual void Tick() = 0;
 

@@ -68,6 +68,8 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGamingSessionUserLeft, const FSes
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGamingLobbyInviteAccepted, const FLobbyInviteAcceptedInfo&, InviteInfo);
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGamingAvatarReady, const FString&, UserId);
+
 UCLASS()
 class GAMINGSERVICES_API UGamingServicesSubsystem : public UGameInstanceSubsystem, public FTickableGameObject
 {
@@ -250,6 +252,8 @@ public:
 	FOnGamingSessionUserLeft OnSessionUserLeft;
 	UPROPERTY(BlueprintAssignable, Category = "GamingServices|Events")
 	FOnGamingLobbyInviteAccepted OnLobbyInviteAccepted;
+	UPROPERTY(BlueprintAssignable, Category = "GamingServices|Events")
+	FOnGamingAvatarReady OnAvatarReady;
 
 	FGamingService& GetService() const { return *Service; }
 

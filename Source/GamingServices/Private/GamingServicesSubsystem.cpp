@@ -25,6 +25,10 @@ void UGamingServicesSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	{
 		OnSessionEnded.Broadcast(Result);
 	};
+	Service->OnAvatarReady = [this](const FString& UserId)
+	{
+		OnAvatarReady.Broadcast(UserId);
+	};
 
 	Super::Initialize(Collection);
 }
