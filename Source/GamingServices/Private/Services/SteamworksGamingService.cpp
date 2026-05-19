@@ -28,7 +28,8 @@ public:
 		Owner(InOwner),
 		m_CallbackLobbyChatUpdate(this, &FSteamworksGamingServiceImpl::OnLobbyChatUpdate),
 		m_CallbackGameLobbyJoinRequested(this, &FSteamworksGamingServiceImpl::OnGameLobbyJoinRequested),
-		m_CallbackAvatarImageLoaded(this, &FSteamworksGamingServiceImpl::OnAvatarImageLoaded)
+		m_CallbackAvatarImageLoaded(this, &FSteamworksGamingServiceImpl::OnAvatarImageLoaded),
+		m_CallbackPersonaStateChange(this, &FSteamworksGamingServiceImpl::OnPersonaStateChange)
 	{
 	}
 
@@ -1256,6 +1257,7 @@ private:
 	CCallback<FSteamworksGamingServiceImpl, LobbyChatUpdate_t> m_CallbackLobbyChatUpdate;
 	CCallback<FSteamworksGamingServiceImpl, GameLobbyJoinRequested_t> m_CallbackGameLobbyJoinRequested;
 	CCallback<FSteamworksGamingServiceImpl, AvatarImageLoaded_t> m_CallbackAvatarImageLoaded;
+	CCallback<FSteamworksGamingServiceImpl, PersonaStateChange_t> m_CallbackPersonaStateChange;
 
 	TMap<uint64, TStrongObjectPtr<UTexture2D>> AvatarCache;
 	TSet<uint64> RequestedAvatars;
@@ -1318,6 +1320,44 @@ private:
 		// "try now" path where the caller already gets the texture as a return value;
 		// firing a ready event from that path would be redundant (and re-entrant from the
 		// caller's perspective).
+		if (Owner->OnAvatarReady && AvatarCache.Contains(SteamID64))
+		{
+			Owner->OnAvatarReady(FString::Printf(TEXT("%llu"), SteamID64));
+		}
+	}
+
+	// Steam does not guarantee AvatarImageLoaded_t for every avatar we display - for
+	// non-friend lobby members the bytes often arrive via persona delivery instead, or
+	// are already client-cached so no image-load event fires. Re-query the handle on a
+	// persona change for users we've requested/shown so the avatar still resolves.
+	void OnPersonaStateChange(PersonaStateChange_t* pParam)
+	{
+		if (!SteamFriends || !pParam)
+		{
+			return;
+		}
+
+		const uint64 SteamID64 = pParam->m_ulSteamID;
+		if (!RequestedAvatars.Contains(SteamID64) && !AvatarCache.Contains(SteamID64))
+		{
+			return;
+		}
+
+		const bool bAvatarChanged = (pParam->m_nChangeFlags & k_EPersonaChangeAvatar) != 0;
+		const bool bNeedAvatar = !AvatarCache.Contains(SteamID64);
+		if (!bAvatarChanged && !bNeedAvatar)
+		{
+			return;
+		}
+
+		const int AvatarHandle = SteamFriends->GetLargeFriendAvatar(CSteamID(SteamID64));
+		if (AvatarHandle <= 0)
+		{
+			// Still not materialized; a later AvatarImageLoaded_t or persona change retries.
+			return;
+		}
+
+		BuildAvatarFromHandle(SteamID64, AvatarHandle);
 		if (Owner->OnAvatarReady && AvatarCache.Contains(SteamID64))
 		{
 			Owner->OnAvatarReady(FString::Printf(TEXT("%llu"), SteamID64));
