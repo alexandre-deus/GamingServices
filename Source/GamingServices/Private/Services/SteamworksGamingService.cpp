@@ -759,6 +759,7 @@ public:
 				{
 					CSteamID Member = SteamMatchmaking->GetLobbyMemberByIndex(CurrentLobbyId, i);
 					CurrentLobbyMembers.Add(Member.ConvertToUint64());
+					EnsureAvatarForMember(Member);
 				}
 
 				SteamMatchmaking->SetLobbyData(CurrentLobbyId, "name", TCHAR_TO_UTF8(*Settings.SessionName));
@@ -974,8 +975,9 @@ public:
 				{
 					CSteamID Member = SteamMatchmaking->GetLobbyMemberByIndex(CurrentLobbyId, i);
 					CurrentLobbyMembers.Add(Member.ConvertToUint64());
+					EnsureAvatarForMember(Member);
 				}
-				
+
 				const char* LobbyName = SteamMatchmaking->GetLobbyData(CurrentLobbyId, "name");
 				JoinResult.SessionInfo.SessionName = UTF8_TO_TCHAR(LobbyName);
 
@@ -1278,6 +1280,7 @@ private:
 		if (pParam->m_rgfChatMemberStateChange & k_EChatMemberStateChangeEntered)
 		{
 			CurrentLobbyMembers.Add(ChangedUser.ConvertToUint64());
+			EnsureAvatarForMember(ChangedUser);
 			UE_LOG(LogTemp, Log, TEXT("SteamworksGamingService: User joined lobby: %s (%s)"), *ChangedDisplayName, *ChangedUserId);
 			if (Owner->OnSessionUserJoined)
 			{
@@ -1341,9 +1344,13 @@ private:
 	void OnAvatarImageLoaded(AvatarImageLoaded_t* pParam)
 	{
 		const uint64 SteamID64 = pParam->m_steamID.ConvertToUint64();
-		// Only react to users we've explicitly requested (or already cached); avoids building
-		// textures for unrelated avatars Steam happens to load (e.g. friend list portraits).
-		if (!RequestedAvatars.Contains(SteamID64) && !AvatarCache.Contains(SteamID64))
+		// Only react to users we care about: ones we've explicitly requested (BP-driven),
+		// ones we've already cached, or ones currently in our lobby (defensive — covers
+		// Steam pre-loading the avatar before our eager EnsureAvatarForMember runs).
+		// Filters out unrelated avatars Steam happens to load (e.g. friend list portraits).
+		if (!RequestedAvatars.Contains(SteamID64)
+			&& !AvatarCache.Contains(SteamID64)
+			&& !CurrentLobbyMembers.Contains(SteamID64))
 		{
 			return;
 		}
@@ -1486,6 +1493,50 @@ private:
 		AvatarCache.Emplace(SteamID64, TStrongObjectPtr<UTexture2D>(Texture));
 		RequestedAvatars.Remove(SteamID64);
 		UE_LOG(LogTemp, Log, TEXT("SteamworksGamingService: Avatar loaded for %llu (%ux%u)"), SteamID64, Width, Height);
+	}
+
+	// Eagerly fetch a lobby member's user info + avatar so Steam knows we care about them.
+	// Without this, on a fresh Steam restart the local client has nothing cached for non-friend
+	// lobby members and Steam never fires AvatarImageLoaded_t for them (we never asked).
+	// Call when a member is detected via lobby snapshot or LobbyChatUpdate "entered".
+	void EnsureAvatarForMember(const CSteamID& SteamID)
+	{
+		if (!SteamFriends || !SteamID.IsValid())
+		{
+			return;
+		}
+
+		const uint64 SteamID64 = SteamID.ConvertToUint64();
+		if (AvatarCache.Contains(SteamID64))
+		{
+			return;
+		}
+
+		// Tell Steam to download persona/avatar info for this user. No-op if already cached.
+		SteamFriends->RequestUserInformation(SteamID, /*bRequireNameOnly=*/false);
+
+		const int AvatarHandle = SteamFriends->GetLargeFriendAvatar(SteamID);
+		if (AvatarHandle == 0)
+		{
+			// Not loaded yet — register interest so OnAvatarImageLoaded's gate passes when Steam delivers.
+			RequestedAvatars.Add(SteamID64);
+			return;
+		}
+		if (AvatarHandle < 0)
+		{
+			// User has no avatar set — nothing to fetch.
+			return;
+		}
+
+		// Already loaded by Steam. Build the texture now and fire OnAvatarReady so any
+		// listener that registered before the eager fetch can still pick it up — the
+		// synchronous GetAvatarForSteamID path skips the event, but here there's no caller
+		// holding the return value, so we must broadcast.
+		BuildAvatarFromHandle(SteamID64, AvatarHandle);
+		if (Owner->OnAvatarReady && AvatarCache.Contains(SteamID64))
+		{
+			Owner->OnAvatarReady(FString::Printf(TEXT("%llu"), SteamID64));
+		}
 	}
 
 	void OnGameLobbyJoinRequested(GameLobbyJoinRequested_t* pParam)
