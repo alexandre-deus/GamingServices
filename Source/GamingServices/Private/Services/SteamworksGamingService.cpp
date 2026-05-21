@@ -1293,9 +1293,43 @@ private:
 			{
 				Owner->OnSessionUserLeft(FSessionMemberInfo(ChangedUserId, ChangedDisplayName));
 			}
-			if (ChangedUser == CurrentHostId)
+
+			// Two cases mean the lobby has effectively ended for us and our cached state must
+			// be cleared, otherwise the next JoinSession/CreateSession takes a recursive
+			// LeaveSession-then-rejoin path against dead Steam state and the rejoin races
+			// Steam's P2P teardown.
+			//   - The host left  -> the lobby is gone for everyone.
+			//   - This user left -> kicked/banned/disconnected without going through our own
+			//                       LeaveSession()/DestroySession() (Steam overlay quit, network drop, etc).
+			const bool bHostLeft = (ChangedUser == CurrentHostId);
+			const bool bSelfLeft = (SteamUser && ChangedUser == SteamUser->GetSteamID());
+			if (bHostLeft || bSelfLeft)
 			{
-				UE_LOG(LogTemp, Warning, TEXT("SteamworksGamingService: Host has left the lobby"));
+				if (bHostLeft)
+				{
+					UE_LOG(LogTemp, Warning, TEXT("SteamworksGamingService: Host has left the lobby"));
+				}
+				if (bSelfLeft)
+				{
+					UE_LOG(LogTemp, Warning, TEXT("SteamworksGamingService: Local user removed from lobby (kick/disconnect)"));
+				}
+
+				// Defensive: ask Steam to drop us from the lobby. No-op if Steam already
+				// removed us (host-left tears the lobby down on Steam's side), but covers the
+				// case where the chat-update reflects a partial state.
+				if (SteamMatchmaking && CurrentLobbyId.IsValid())
+				{
+					SteamMatchmaking->LeaveLobby(CurrentLobbyId);
+				}
+
+				// Clear cached state before firing OnSessionEnded so application-layer
+				// listeners that react by calling JoinSession/CreateSession see clean state.
+				bIsInLobby = false;
+				bIsLobbyHost = false;
+				CurrentLobbyId = CSteamID();
+				CurrentHostId = CSteamID();
+				CurrentLobbyMembers.Empty();
+
 				if (Owner->OnSessionEnded)
 				{
 					Owner->OnSessionEnded(FGamingServiceResult(true));
