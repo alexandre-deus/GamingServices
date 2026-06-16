@@ -1891,6 +1891,14 @@ void FSteamworksGamingService::InitializePlatform()
 	const uint32 AppId = static_cast<uint32>(AppIdInt);
 	UE_LOG(LogTemp, Log, TEXT("SteamworksGamingService: AppId=%u from config"), AppId);
 
+	// Make the configured AppId authoritative for init. SteamAPI_Init derives the running
+	// AppId from the SteamAppId/SteamGameId environment (or a steam_appid.txt in the working
+	// dir) - NOT from the value passed to RestartAppIfNecessary. Set the environment from
+	// config before either call so a stale steam_appid.txt (e.g. 480/Spacewar) can't win.
+	const FString AppIdStr = FString::FromInt(AppIdInt);
+	FPlatformMisc::SetEnvironmentVar(TEXT("SteamAppId"), *AppIdStr);
+	FPlatformMisc::SetEnvironmentVar(TEXT("SteamGameId"), *AppIdStr);
+
 	if (SteamAPI_RestartAppIfNecessary(AppId))
 	{
 		UE_LOG(LogTemp, Log, TEXT("SteamworksGamingService: SteamAPI_RestartAppIfNecessary requested relaunch via Steam; exiting"));
