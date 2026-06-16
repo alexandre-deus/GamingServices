@@ -1754,7 +1754,8 @@ private:
 		ESteamAPIInitResult Result = SteamAPI_InitEx(&ErrMsg);
 		if (Result != k_ESteamAPIInitResult_OK)
 		{
-			UE_LOG(LogTemp, Error, TEXT("SteamworksGamingService: Steam init failed (%d): %hs"), (int32)Result, ErrMsg);
+			// Steam is required to run; do not let the application continue past a failed init.
+			UE_LOG(LogTemp, Fatal, TEXT("SteamworksGamingService: Steam init failed (%d): %hs"), (int32)Result, ErrMsg);
 			return;
 		}
 
@@ -1768,8 +1769,71 @@ private:
 
 		if (!SteamUserStats || !SteamUser || !SteamUtils || !SteamFriends || !SteamRemoteStorage || !SteamMatchmaking || !SteamApps)
 		{
+			// A null accessor after a successful init means the running Steam client does not
+			// expose the interface version string this SDK was built against (SDK/client mismatch).
+			// Steamworks has no API to query a numeric client SDK version, so for each missing
+			// interface we report the version string we ship and probe downward to find the
+			// highest version string the client *does* support - that difference is the mismatch.
+			auto ProbeClientVersion = [](const ANSICHAR* ShippedVersion) -> FString
+			{
+				const FString Shipped = ANSI_TO_TCHAR(ShippedVersion);
+				int32 SplitIdx = Shipped.Len();
+				while (SplitIdx > 0 && FChar::IsDigit(Shipped[SplitIdx - 1]))
+				{
+					--SplitIdx;
+				}
+				if (SplitIdx == Shipped.Len())
+				{
+					return FString(); // No trailing version number to walk back from.
+				}
+
+				const FString Prefix = Shipped.Left(SplitIdx);
+				const int32 Width = Shipped.Len() - SplitIdx;
+				const int32 ShippedNum = FCString::Atoi(*Shipped.Mid(SplitIdx));
+				const HSteamUser hUser = SteamAPI_GetHSteamUser();
+
+				for (int32 N = ShippedNum; N >= 1; --N)
+				{
+					FString NumPart = FString::FromInt(N);
+					while (NumPart.Len() < Width)
+					{
+						NumPart = TEXT("0") + NumPart;
+					}
+					const FString Candidate = Prefix + NumPart;
+					if (SteamInternal_FindOrCreateUserInterface(hUser, TCHAR_TO_ANSI(*Candidate)) != nullptr)
+					{
+						return Candidate;
+					}
+				}
+				return FString();
+			};
+
+			auto LogIfMissing = [&ProbeClientVersion](const void* Interface, const ANSICHAR* VersionString)
+			{
+				if (!Interface)
+				{
+					const FString ClientVersion = ProbeClientVersion(VersionString);
+					UE_LOG(LogTemp, Error,
+						   TEXT("SteamworksGamingService: interface version mismatch - we ship '%hs', client's highest supported is '%s'"),
+						   VersionString,
+						   ClientVersion.IsEmpty() ? TEXT("NONE") : *ClientVersion);
+				}
+			};
+
+			// Emit the per-interface diagnostics first (Error verbosity), then halt: a Fatal log
+			// terminates immediately, so it must come last or the mismatch detail is never printed.
 			UE_LOG(LogTemp, Error, TEXT("SteamworksGamingService: Failed to get Steam interfaces"));
+			LogIfMissing(SteamUserStats,     STEAMUSERSTATS_INTERFACE_VERSION);
+			LogIfMissing(SteamUser,          STEAMUSER_INTERFACE_VERSION);
+			LogIfMissing(SteamUtils,         STEAMUTILS_INTERFACE_VERSION);
+			LogIfMissing(SteamFriends,       STEAMFRIENDS_INTERFACE_VERSION);
+			LogIfMissing(SteamRemoteStorage, STEAMREMOTESTORAGE_INTERFACE_VERSION);
+			LogIfMissing(SteamMatchmaking,   STEAMMATCHMAKING_INTERFACE_VERSION);
+			LogIfMissing(SteamApps,          STEAMAPPS_INTERFACE_VERSION);
+
 			SteamAPI_Shutdown();
+			// Steam is required to run; do not let the application continue past a failed init.
+			UE_LOG(LogTemp, Fatal, TEXT("SteamworksGamingService: aborting - required Steam interfaces unavailable (see version mismatch log above)"));
 			return;
 		}
 
