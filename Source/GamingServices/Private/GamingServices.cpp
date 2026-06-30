@@ -1,9 +1,8 @@
 #include "GamingServices.h"
 #include "Misc/App.h"
 #include "Misc/CoreDelegates.h"
-#include "Services/EOSGamingService.h"
-#include "Services/SteamworksGamingService.h"
-#include "Services/NullGamingService.h"
+#include "Native/GamingServiceFactory.h"
+#include "Native/Null/NullGamingService.h"
 
 #ifdef USE_STEAMWORKS
 #include "SocketSubsystemModule.h"
@@ -19,20 +18,13 @@ void FGamingServicesModule::StartupModule()
 	// (i.e. Standalone Game from the editor), false for PIE / regular editor.
 	const bool bUseRealService = FApp::IsGame();
 
-	if (bUseRealService)
-	{
-#ifdef USE_EOS
-		Service = MakeUnique<FEOSGamingService>();
-#elif defined(USE_STEAMWORKS)
-		Service = MakeUnique<FSteamworksGamingService>();
-#else
-		Service = MakeUnique<FNullGamingService>();
-#endif
-	}
-	else
-	{
-		Service = MakeUnique<FNullGamingService>();
-	}
+	// This module owns the single live platform backend — the decomposed Native/ service selected at
+	// build time (Steam/EOS/Null). UGamingPlatformSubsystem consumes and ticks this same instance, so
+	// exactly ONE backend ever inits the platform SDK. Outside a real game session (PIE / editor) we
+	// force the honest null backend regardless of the configured SDK.
+	Service = bUseRealService
+		? GamingServices::CreateGamingService()
+		: MakeUnique<GamingServices::FNullGamingService>();
 
 	Service->InitializePlatform();
 

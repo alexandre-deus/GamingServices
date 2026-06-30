@@ -189,6 +189,11 @@ public class GamingServices : ModuleRules
 
         PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 
+        // Per-backend private roots so internal headers resolve by name across the Steam/EOS subfolders
+        // (e.g. "SteamPlatformCore.h", "SteamCallResultManager.h", "Interfaces/SteamMatchmaking.h").
+        PrivateIncludePaths.Add(Path.Combine(ModuleDirectory, "Private", "Native", "Steam"));
+        PrivateIncludePaths.Add(Path.Combine(ModuleDirectory, "Private", "Native", "EOS"));
+
         PublicDependencyModuleNames.AddRange(new[]
         {
             "Core"
