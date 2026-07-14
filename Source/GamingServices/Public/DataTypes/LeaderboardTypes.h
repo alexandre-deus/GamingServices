@@ -43,9 +43,12 @@ struct FLeaderboardResult : public FGamingServiceResult
 	UPROPERTY(BlueprintReadOnly)
 	int32 TotalEntries = 0;
 
+	/** 0-based start index to pass as Offset for the next page, or -1 when this was the last page. */
 	UPROPERTY(BlueprintReadOnly)
-	int32 ContinuationToken = 0;
+	int32 NextOffset = -1;
 
+	/** The querying user's own rank (1-based) and score, or -1 rank when they have no entry. Populated
+	 *  by QueryLeaderboardUserRank; left at the defaults by the paged query. */
 	UPROPERTY(BlueprintReadOnly)
 	int32 UserRank = -1;
 

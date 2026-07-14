@@ -10,13 +10,18 @@ namespace GamingServices
 	class FEOSPlatformCore;
 
 	/**
-	 * EOS matchmaking capability (Sessions API) over the shared platform core.
+	 * EOS matchmaking capability built on the Lobby API (not Sessions: lobbies push member join/leave
+	 * notifications and carry per-member attributes, giving feature parity with the Steam backend).
 	 *
-	 * Also owns the session-invite-accepted notification. Its registration needs the sessions handle and
-	 * ProductUserId that only exist after login, so the constructor binds the core's
-	 * Register/UnregisterSessionInviteNotificationHook; the core fires those at the correct points in the
-	 * login / shutdown sequence and this class does the EOS_Sessions_AddNotifySessionInviteAccepted /
-	 * Remove work, firing its own OnLobbyInviteAccepted sink directly.
+	 * The "session" the IMatchmakingService contract speaks of maps to an EOS lobby. The human-facing
+	 * session name travels as an advertised lobby attribute; each member advertises their display name
+	 * as a member attribute so the join/leave sinks can carry real names.
+	 *
+	 * Also owns the lobby notifications (invite-accepted + member-status). Their registration needs the
+	 * lobby handle and ProductUserId that only exist after login, so the constructor binds the core's
+	 * Register/UnregisterMatchmakingNotificationsHook; the core fires those at the correct points in the
+	 * login / shutdown sequence and this class does the EOS_Lobby_AddNotify* / RemoveNotify* work,
+	 * firing its own sinks directly.
 	 */
 	class FEOSMatchmaking final : public IMatchmakingService
 	{
@@ -41,19 +46,32 @@ namespace GamingServices
 		virtual FString GetSessionConnectionString() const override;
 
 	private:
+		// Applies Settings onto the current lobby via EOS_Lobby_UpdateLobbyModification + UpdateLobby.
+		// Shared by UpdateSession / LockLobby / UnlockLobby (and CreateSession's post-create attribute pass).
 		void ApplySessionSettings(const FSessionSettings& Settings, const TCHAR* OperationName,
 		                          const TCHAR* SuccessMessage,
 		                          TFunction<void(const FGamingServiceResult&)> Callback);
 
-		// Session-invite-accepted notification, fired from the core's login / shutdown hooks.
-		void RegisterSessionInviteNotification();
-		void UnregisterSessionInviteNotification();
+		// Lobby notifications, registered / torn down from the core's login / shutdown hooks.
+		void RegisterLobbyNotifications();
+		void UnregisterLobbyNotifications();
+
+		void ResetLobbyState();
 
 		FEOSPlatformCore& Core;
 
+		// Lobby membership bookkeeping ("session" state as seen through IMatchmakingService).
+		bool bIsInLobby = false;
+		bool bIsLobbyOwner = false;
+		FString CurrentLobbyId;
+		FString CurrentLobbyOwnerPuid;
+		FString CurrentSessionName;
+		FSessionSettings CurrentSessionSettings;
+
 		// EOS_NotificationId (uint64); 0 == EOS_INVALID_NOTIFICATIONID. Stored as uint64 so this header
 		// stays SDK-free.
-		uint64 SessionInviteAcceptedNotificationId = 0;
+		uint64 LobbyInviteAcceptedNotificationId = 0;
+		uint64 LobbyMemberStatusNotificationId = 0;
 	};
 }
 

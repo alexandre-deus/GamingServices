@@ -22,8 +22,9 @@ namespace GamingServices
 		EOS_HStats StatsHandle = nullptr;
 		EOS_HConnect ConnectHandle = nullptr;
 		EOS_HPlayerDataStorage PlayerDataStorageHandle = nullptr;
-		EOS_HSessions SessionsHandle = nullptr;
+		EOS_HLobby LobbyHandle = nullptr;
 		EOS_HEcom EcomHandle = nullptr;
+		EOS_HUserInfo UserInfoHandle = nullptr;
 
 		EOS_EpicAccountId EpicAccountIdCached = nullptr;
 		EOS_ProductUserId ProductUserId = nullptr;
@@ -78,7 +79,9 @@ namespace GamingServices
 	void* FEOSPlatformCore::GetLeaderboardsHandle() const { return Impl->LeaderboardsHandle; }
 	void* FEOSPlatformCore::GetStatsHandle() const { return Impl->StatsHandle; }
 	void* FEOSPlatformCore::GetPlayerDataStorageHandle() const { return Impl->PlayerDataStorageHandle; }
-	void* FEOSPlatformCore::GetSessionsHandle() const { return Impl->SessionsHandle; }
+	void* FEOSPlatformCore::GetLobbyHandle() const { return Impl->LobbyHandle; }
+	void* FEOSPlatformCore::GetConnectHandle() const { return Impl->ConnectHandle; }
+	void* FEOSPlatformCore::GetUserInfoHandle() const { return Impl->UserInfoHandle; }
 	void* FEOSPlatformCore::GetEcomHandle() const { return Impl->EcomHandle; }
 
 	void* FEOSPlatformCore::GetEpicAccountId() const { return Impl->EpicAccountIdCached; }
@@ -104,24 +107,45 @@ namespace GamingServices
 		return nullptr;
 	}
 
-	void FEOSPlatformCore::InitializePlatform()
+	void FEOSPlatformCore::InitializePlatform(const FEOSInitOptions& Overrides)
 	{
 		const TCHAR* Section = TEXT("GamingServices.EOS");
 		FEOSInitOptions Opts;
-		const bool bComplete =
-			GConfig->GetString(Section, TEXT("ProductName"),    Opts.ProductName,    GGameIni) &&
-			GConfig->GetString(Section, TEXT("ProductVersion"), Opts.ProductVersion,  GGameIni) &&
-			GConfig->GetString(Section, TEXT("ProductId"),      Opts.ProductId,       GGameIni) &&
-			GConfig->GetString(Section, TEXT("SandboxId"),      Opts.SandboxId,       GGameIni) &&
-			GConfig->GetString(Section, TEXT("DeploymentId"),   Opts.DeploymentId,    GGameIni) &&
-			GConfig->GetString(Section, TEXT("ClientId"),       Opts.ClientId,        GGameIni) &&
-			GConfig->GetString(Section, TEXT("ClientSecret"),   Opts.ClientSecret,    GGameIni) &&
-			GConfig->GetString(Section, TEXT("EncryptionKey"),  Opts.EncryptionKey,   GGameIni);
 
-		if (!bComplete)
+		// Config supplies the defaults; any non-empty field in Overrides wins. Per-field overrides let
+		// a test harness run several local instances against different EOS clients (e.g. one Dev Auth
+		// Tool client per instance) without touching the ini.
+		const struct { const TCHAR* Key; const FString& Override; FString& Value; } Fields[] = {
+			{ TEXT("ProductName"),    Overrides.ProductName,    Opts.ProductName },
+			{ TEXT("ProductVersion"), Overrides.ProductVersion, Opts.ProductVersion },
+			{ TEXT("ProductId"),      Overrides.ProductId,      Opts.ProductId },
+			{ TEXT("SandboxId"),      Overrides.SandboxId,      Opts.SandboxId },
+			{ TEXT("DeploymentId"),   Overrides.DeploymentId,   Opts.DeploymentId },
+			{ TEXT("ClientId"),       Overrides.ClientId,       Opts.ClientId },
+			{ TEXT("ClientSecret"),   Overrides.ClientSecret,   Opts.ClientSecret },
+			{ TEXT("EncryptionKey"),  Overrides.EncryptionKey,  Opts.EncryptionKey },
+		};
+
+		TArray<FString> MissingKeys;
+		for (const auto& Field : Fields)
 		{
-			UE_LOG(LogTemp, Error, TEXT("EOSGamingService: Missing required config in [GamingServices.EOS]. "
-				"Required keys: ProductName, ProductVersion, ProductId, SandboxId, DeploymentId, ClientId, ClientSecret, EncryptionKey"));
+			GConfig->GetString(Section, Field.Key, Field.Value, GGameIni);
+			if (!Field.Override.IsEmpty())
+			{
+				Field.Value = Field.Override;
+				UE_LOG(LogTemp, Log, TEXT("EOSGamingService: %s overridden by init params"), Field.Key);
+			}
+			if (Field.Value.IsEmpty())
+			{
+				MissingKeys.Add(Field.Key);
+			}
+		}
+
+		if (MissingKeys.Num() > 0)
+		{
+			UE_LOG(LogTemp, Error, TEXT("EOSGamingService: Missing required EOS settings: %s. "
+				"Each must come from [GamingServices.EOS] in Game.ini or a non-empty FEOSInitOptions override."),
+				*FString::Join(MissingKeys, TEXT(", ")));
 			return;
 		}
 
@@ -196,11 +220,11 @@ namespace GamingServices
 			UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Skipping cloud sync - not logged in or handles not valid"));
 		}
 
-		// Unregister session invite notification (owned by FEOSMatchmaking, torn down here so the ordering
-		// matches the legacy flow where it was removed during core shutdown).
-		if (UnregisterSessionInviteNotificationHook)
+		// Unregister the matchmaking notifications (owned by FEOSMatchmaking, torn down here so the ordering
+		// matches the legacy flow where they were removed during core shutdown).
+		if (UnregisterMatchmakingNotificationsHook)
 		{
-			UnregisterSessionInviteNotificationHook();
+			UnregisterMatchmakingNotificationsHook();
 		}
 
 		bIsConnected = false;
@@ -217,27 +241,6 @@ namespace GamingServices
 		{
 			EOS_Platform_Tick(Impl->PlatformHandle);
 		}
-	}
-
-	FString FEOSPlatformCore::GetSessionConnectionString() const
-	{
-		if (!bIsInSession || CurrentSessionName.IsEmpty())
-		{
-			return FString();
-		}
-
-		// For EOS, the host's ProductUserId is used as the connection identifier
-		if (Impl->ProductUserId)
-		{
-			char ProductUserIdStr[EOS_PRODUCTUSERID_MAX_LENGTH + 1];
-			int32_t BufferLength = sizeof(ProductUserIdStr);
-			if (EOS_ProductUserId_ToString(Impl->ProductUserId, ProductUserIdStr, &BufferLength) == EOS_EResult::EOS_Success)
-			{
-				return FString::Printf(TEXT("eos.%s"), UTF8_TO_TCHAR(ProductUserIdStr));
-			}
-		}
-
-		return FString();
 	}
 
 	FString FEOSPlatformCore::GetFullLocalPath(const FString& RelativePath) const
@@ -274,6 +277,11 @@ namespace GamingServices
 		EOS_Auth_Credentials Credentials = {};
 		Credentials.ApiVersion = EOS_AUTH_CREDENTIALS_API_LATEST;
 
+		// These must stay alive until EOS_Auth_Login below has copied the credential strings;
+		// assigning TCHAR_TO_UTF8() directly to Credentials leaves dangling pointers.
+		const std::string DevHostUtf8 = TCHAR_TO_UTF8(*Params.EOS.DeveloperHost);
+		const std::string DevCredUtf8 = TCHAR_TO_UTF8(*Params.EOS.DeveloperCredentialName);
+
 		switch (Params.EOS.Method)
 		{
 		case EEOSLoginMethod::PersistentAuth:
@@ -287,13 +295,13 @@ namespace GamingServices
 			break;
 		case EEOSLoginMethod::Developer:
 			Credentials.Type = EOS_ELoginCredentialType::EOS_LCT_Developer;
-			if (!Params.EOS.DeveloperHost.IsEmpty())
+			if (!DevHostUtf8.empty())
 			{
-				Credentials.Id = TCHAR_TO_UTF8(*Params.EOS.DeveloperHost);
+				Credentials.Id = DevHostUtf8.c_str();
 			}
-			if (!Params.EOS.DeveloperCredentialName.IsEmpty())
+			if (!DevCredUtf8.empty())
 			{
-				Credentials.Token = TCHAR_TO_UTF8(*Params.EOS.DeveloperCredentialName);
+				Credentials.Token = DevCredUtf8.c_str();
 			}
 			break;
 		default:
@@ -440,62 +448,161 @@ namespace GamingServices
 		bIsLoggedIn = true;
 		Impl->ProductUserId = static_cast<EOS_ProductUserId>(InProductUserId);
 
-		// Register for session invite accepted notifications. The notification conceptually belongs to
-		// FEOSMatchmaking, but it must be registered here at the same point in the login flow as before
-		// (right after ProductUserId is set and the sessions handle is valid), so the core fires the
-		// matchmaking-owned hook rather than doing the registration itself.
-		if (RegisterSessionInviteNotificationHook)
+		// Cache the identity fields served by IUserService. UserId is the ProductUserId (the id the
+		// stats / leaderboards / sessions APIs key on); DisplayName is fetched asynchronously below.
+		char PuidStr[EOS_PRODUCTUSERID_MAX_LENGTH + 1];
+		int32_t PuidLen = sizeof(PuidStr);
+		if (EOS_ProductUserId_ToString(Impl->ProductUserId, PuidStr, &PuidLen) == EOS_EResult::EOS_Success)
 		{
-			RegisterSessionInviteNotificationHook();
+			UserId = UTF8_TO_TCHAR(PuidStr);
 		}
 
-		UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Authentication successful, loading definitions..."));
-		LoadAchievementDefinitions([this, AuthCtx](const bool& bSuccess)
+		// Register the matchmaking notifications (lobby invite-accepted + member-status). They conceptually
+		// belong to FEOSMatchmaking, but must be registered at this point in the login flow (right after
+		// ProductUserId is set and the lobby handle is valid), so the core fires the matchmaking-owned hook
+		// rather than doing the registration itself.
+		if (RegisterMatchmakingNotificationsHook)
 		{
-			if (!bSuccess)
-			{
-				UE_LOG(LogTemp, Error, TEXT("EOSGamingService: Achievement definition loading failed"));
-				FCoreLoginCtx::Complete(AuthCtx, FGamingServiceResult(false));
-				return;
-			}
+			RegisterMatchmakingNotificationsHook();
+		}
 
-			LoadLeaderboardDefinitions([this, AuthCtx](const bool& bSuccess)
+		UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Authentication successful, resolving display name..."));
+		QueryDisplayName([this, AuthCtx]()
+		{
+			UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Loading definitions..."));
+			LoadAchievementDefinitions([this, AuthCtx](const bool& bSuccess)
 			{
 				if (!bSuccess)
 				{
-					UE_LOG(LogTemp, Error, TEXT("EOSGamingService: Leaderboard definition loading failed"));
+					UE_LOG(LogTemp, Error, TEXT("EOSGamingService: Achievement definition loading failed"));
 					FCoreLoginCtx::Complete(AuthCtx, FGamingServiceResult(false));
 					return;
 				}
 
-				bDefinitionsLoaded = true;
-				UE_LOG(LogTemp, Log, TEXT("EOSGamingService: All definitions loaded, starting cloud sync..."));
-
-				if (!SyncFromCloudHook)
+				LoadLeaderboardDefinitions([this, AuthCtx](const bool& bSuccess)
 				{
-					UE_LOG(LogTemp, Warning, TEXT("EOSGamingService: No cloud sync hook bound, completing login"));
-					UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Authentication complete"));
-					FCoreLoginCtx::Complete(AuthCtx, FGamingServiceResult(true));
-					return;
-				}
-
-				SyncFromCloudHook([this, AuthCtx](const FGamingServiceResult& SyncResult)
-				{
-					if (!SyncResult.bSuccess)
+					if (!bSuccess)
 					{
-						UE_LOG(LogTemp, Warning,
-						       TEXT("EOSGamingService: Cloud sync failed, but continuing with login"));
-					}
-					else
-					{
-						UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Cloud sync completed successfully"));
+						UE_LOG(LogTemp, Error, TEXT("EOSGamingService: Leaderboard definition loading failed"));
+						FCoreLoginCtx::Complete(AuthCtx, FGamingServiceResult(false));
+						return;
 					}
 
-					UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Authentication complete"));
-					FCoreLoginCtx::Complete(AuthCtx, FGamingServiceResult(true));
+					bDefinitionsLoaded = true;
+					UE_LOG(LogTemp, Log, TEXT("EOSGamingService: All definitions loaded, starting cloud sync..."));
+
+					if (!SyncFromCloudHook)
+					{
+						UE_LOG(LogTemp, Warning, TEXT("EOSGamingService: No cloud sync hook bound, completing login"));
+						UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Authentication complete"));
+						FCoreLoginCtx::Complete(AuthCtx, FGamingServiceResult(true));
+						return;
+					}
+
+					SyncFromCloudHook([this, AuthCtx](const FGamingServiceResult& SyncResult)
+					{
+						if (!SyncResult.bSuccess)
+						{
+							UE_LOG(LogTemp, Warning,
+							       TEXT("EOSGamingService: Cloud sync failed, but continuing with login"));
+						}
+						else
+						{
+							UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Cloud sync completed successfully"));
+						}
+
+						UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Authentication complete"));
+						FCoreLoginCtx::Complete(AuthCtx, FGamingServiceResult(true));
+					});
 				});
 			});
 		});
+	}
+
+	void FEOSPlatformCore::QueryDisplayName(TFunction<void()> OnComplete)
+	{
+		// Best-effort: a missing display name must never fail the login, so every path continues.
+		if (!Impl->UserInfoHandle || !Impl->EpicAccountIdCached)
+		{
+			OnComplete();
+			return;
+		}
+
+		struct FDisplayNameCtx
+		{
+			FEOSPlatformCore* Core;
+			TFunction<void()> OnComplete;
+		};
+		auto* Ctx = new FDisplayNameCtx{this, MoveTemp(OnComplete)};
+
+		EOS_UserInfo_QueryUserInfoOptions QueryOptions = {};
+		QueryOptions.ApiVersion = EOS_USERINFO_QUERYUSERINFO_API_LATEST;
+		QueryOptions.LocalUserId = Impl->EpicAccountIdCached;
+		QueryOptions.TargetUserId = Impl->EpicAccountIdCached;
+
+		EOS_UserInfo_QueryUserInfo(
+			Impl->UserInfoHandle,
+			&QueryOptions,
+			Ctx,
+			[](const EOS_UserInfo_QueryUserInfoCallbackInfo* Data)
+			{
+				check(Data);
+				check(Data->ClientData);
+				const TUniquePtr<FDisplayNameCtx> LocalCtx(static_cast<FDisplayNameCtx*>(Data->ClientData));
+				FEOSPlatformCore* Core = LocalCtx->Core;
+
+				if (Data->ResultCode == EOS_EResult::EOS_Success)
+				{
+					const auto ExtractName = [Core](EOS_UserInfo_BestDisplayName* Best)
+					{
+						if (Best)
+						{
+							const char* Name = Best->DisplayName ? Best->DisplayName : Best->DisplayNameSanitized;
+							if (Name)
+							{
+								Core->DisplayName = UTF8_TO_TCHAR(Name);
+							}
+							EOS_UserInfo_BestDisplayName_Release(Best);
+						}
+					};
+
+					EOS_UserInfo_CopyBestDisplayNameOptions CopyOptions = {};
+					CopyOptions.ApiVersion = EOS_USERINFO_COPYBESTDISPLAYNAME_API_LATEST;
+					CopyOptions.LocalUserId = Core->Impl->EpicAccountIdCached;
+					CopyOptions.TargetUserId = Core->Impl->EpicAccountIdCached;
+
+					EOS_UserInfo_BestDisplayName* Best = nullptr;
+					if (EOS_UserInfo_CopyBestDisplayName(Core->Impl->UserInfoHandle, &CopyOptions, &Best) ==
+						EOS_EResult::EOS_Success)
+					{
+						ExtractName(Best);
+					}
+					else
+					{
+						// Accounts without a linked external platform (e.g. Dev Auth Tool logins) report
+						// BestDisplayNameIndeterminate; per SDK docs, fall back to the Epic platform name.
+						EOS_UserInfo_CopyBestDisplayNameWithPlatformOptions PlatformOptions = {};
+						PlatformOptions.ApiVersion = EOS_USERINFO_COPYBESTDISPLAYNAMEWITHPLATFORM_API_LATEST;
+						PlatformOptions.LocalUserId = Core->Impl->EpicAccountIdCached;
+						PlatformOptions.TargetUserId = Core->Impl->EpicAccountIdCached;
+						PlatformOptions.TargetPlatformType = EOS_OPT_Epic;
+
+						EOS_UserInfo_BestDisplayName* PlatformBest = nullptr;
+						if (EOS_UserInfo_CopyBestDisplayNameWithPlatform(
+							Core->Impl->UserInfoHandle, &PlatformOptions, &PlatformBest) == EOS_EResult::EOS_Success)
+						{
+							ExtractName(PlatformBest);
+						}
+					}
+				}
+
+				if (Core->DisplayName.IsEmpty())
+				{
+					UE_LOG(LogTemp, Warning, TEXT("EOSGamingService: Could not resolve display name (result %d)"),
+					       (int32)Data->ResultCode);
+				}
+				LocalCtx->OnComplete();
+			});
 	}
 
 	bool FEOSPlatformCore::InitializeEOSPlatform(const FEOSInitOptions& EOSOpts)
@@ -593,7 +700,10 @@ namespace GamingServices
 		FPaths::MakeStandardFilename(CacheDir);
 		FPaths::ConvertRelativePathToFull(CacheDir);
 		IFileManager::Get().MakeDirectory(*CacheDir, true);
-		PlatformOptions.CacheDirectory = TCHAR_TO_UTF8(*CacheDir);
+		// Must outlive the EOS_Platform_Create call below; assigning TCHAR_TO_UTF8() directly leaves
+		// a dangling pointer.
+		const std::string CacheDirUtf8 = TCHAR_TO_UTF8(*CacheDir);
+		PlatformOptions.CacheDirectory = CacheDirUtf8.c_str();
 
 		Impl->PlatformHandle = EOS_Platform_Create(&PlatformOptions);
 		if (!Impl->PlatformHandle)
@@ -612,8 +722,9 @@ namespace GamingServices
 		Impl->StatsHandle = EOS_Platform_GetStatsInterface(Impl->PlatformHandle);
 		Impl->ConnectHandle = EOS_Platform_GetConnectInterface(Impl->PlatformHandle);
 		Impl->PlayerDataStorageHandle = EOS_Platform_GetPlayerDataStorageInterface(Impl->PlatformHandle);
-		Impl->SessionsHandle = EOS_Platform_GetSessionsInterface(Impl->PlatformHandle);
+		Impl->LobbyHandle = EOS_Platform_GetLobbyInterface(Impl->PlatformHandle);
 		Impl->EcomHandle = EOS_Platform_GetEcomInterface(Impl->PlatformHandle);
+		Impl->UserInfoHandle = EOS_Platform_GetUserInfoInterface(Impl->PlatformHandle);
 
 		UE_LOG(LogTemp, Log, TEXT("EOSGamingService: EOS platform created successfully"));
 		return true;

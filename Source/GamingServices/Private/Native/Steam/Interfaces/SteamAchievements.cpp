@@ -34,10 +34,13 @@ namespace GamingServices
 		SteamUserStats->GetAchievement(AchievementIdUTF8, &bAlreadyUnlocked);
 		if (bAlreadyUnlocked)
 		{
+			// Unlocking an already-unlocked achievement is an idempotent success, matching EOS (whose
+			// UnlockAchievements is idempotent). Reporting failure here would make re-unlocks and
+			// re-runs spuriously fail and diverge from the EOS backend.
 			UE_LOG(LogTemp, Log, TEXT("SteamworksGamingService: Achievement already unlocked: %s"), *AchievementId);
 			if (Callback)
 			{
-				Callback(FGamingServiceResult(false));
+				Callback(FGamingServiceResult(true));
 			}
 			return;
 		}

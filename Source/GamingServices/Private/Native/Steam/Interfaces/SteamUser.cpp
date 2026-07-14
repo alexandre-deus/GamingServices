@@ -18,6 +18,9 @@ namespace GamingServices
 		TMap<uint64, TStrongObjectPtr<UTexture2D>> AvatarCache;
 		TSet<uint64> RequestedAvatars;
 
+		// Display-name resolves waiting on Steam to download the persona (keyed by SteamID64).
+		TMap<uint64, TArray<TFunction<void(const FResolveDisplayNameResult&)>>> PendingNameResolves;
+
 		CCallback<FImpl, AvatarImageLoaded_t> m_CallbackAvatarImageLoaded;
 		CCallback<FImpl, PersonaStateChange_t> m_CallbackPersonaStateChange;
 
@@ -64,6 +67,13 @@ namespace GamingServices
 			}
 
 			const uint64 SteamID64 = pParam->m_ulSteamID;
+
+			// A pending display-name resolve for this user can complete now that the persona arrived.
+			if ((pParam->m_nChangeFlags & k_EPersonaChangeName) && PendingNameResolves.Contains(SteamID64))
+			{
+				FlushPendingNameResolves(SteamID64);
+			}
+
 			if (!RequestedAvatars.Contains(SteamID64) && !AvatarCache.Contains(SteamID64))
 			{
 				return;
@@ -87,6 +97,26 @@ namespace GamingServices
 			if (Owner.OnAvatarReady && AvatarCache.Contains(SteamID64))
 			{
 				Owner.OnAvatarReady(FString::Printf(TEXT("%llu"), SteamID64));
+			}
+		}
+
+		// Fire every queued resolve for a user with the persona name Steam now has cached. Always
+		// yields a non-empty value: the id string is the fallback when the name is blank.
+		void FlushPendingNameResolves(uint64 SteamID64)
+		{
+			TArray<TFunction<void(const FResolveDisplayNameResult&)>> Callbacks;
+			PendingNameResolves.RemoveAndCopyValue(SteamID64, Callbacks);
+
+			const FString UserId = FString::Printf(TEXT("%llu"), SteamID64);
+			const FString Name = SteamFriends()
+				                     ? UTF8_TO_TCHAR(SteamFriends()->GetFriendPersonaName(CSteamID(SteamID64)))
+				                     : FString();
+			const FResolveDisplayNameResult Result = (Name.IsEmpty() || Name == TEXT("[unknown]"))
+				                                          ? FResolveDisplayNameResult::Fallback(UserId)
+				                                          : FResolveDisplayNameResult::Resolved(UserId, Name);
+			for (const auto& Callback : Callbacks)
+			{
+				Callback(Result);
 			}
 		}
 
@@ -258,6 +288,33 @@ namespace GamingServices
 	FString FSteamUser::GetDisplayName() const
 	{
 		return Core.GetDisplayName();
+	}
+
+	void FSteamUser::ResolveDisplayName(const FString& UserId,
+	                                   TFunction<void(const FResolveDisplayNameResult&)> Callback)
+	{
+		const uint64 SteamID64 = FCString::Strtoui64(*UserId, nullptr, 10);
+		if (SteamID64 == 0 || !SteamFriends())
+		{
+			Callback(FResolveDisplayNameResult::Fallback(UserId));
+			return;
+		}
+
+		const CSteamID SteamID(SteamID64);
+
+		// RequestUserInformation returns false when the persona is already cached (resolve now),
+		// true when Steam started a download (resolve on the persona-state-change callback).
+		const bool bDownloading = SteamFriends()->RequestUserInformation(SteamID, /*bRequireNameOnly=*/true);
+		if (!bDownloading)
+		{
+			const FString Name = UTF8_TO_TCHAR(SteamFriends()->GetFriendPersonaName(SteamID));
+			Callback((Name.IsEmpty() || Name == TEXT("[unknown]"))
+				         ? FResolveDisplayNameResult::Fallback(UserId)
+				         : FResolveDisplayNameResult::Resolved(UserId, Name));
+			return;
+		}
+
+		Impl->PendingNameResolves.FindOrAdd(SteamID64).Add(MoveTemp(Callback));
 	}
 
 	UTexture2D* FSteamUser::GetAvatar() const

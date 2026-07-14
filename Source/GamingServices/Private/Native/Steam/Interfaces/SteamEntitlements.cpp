@@ -13,7 +13,6 @@ namespace GamingServices
 		checkf(Core.IsInitialized() && Core.IsLoggedIn() && SteamApps,
 			   TEXT("SteamworksGamingService: ListEntitlements called when service not ready"));
 
-		FFilesListResult Dummy;
 		FEntitlementsListResult Result;
 		Result.bSuccess = true;
 

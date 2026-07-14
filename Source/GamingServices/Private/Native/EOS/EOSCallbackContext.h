@@ -16,8 +16,9 @@
 #include "eos_connect.h"
 #include "eos_logging.h"
 #include "eos_playerdatastorage.h"
-#include "eos_sessions.h"
+#include "eos_lobby.h"
 #include "eos_ecom.h"
+#include "eos_userinfo.h"
 
 namespace GamingServices
 {
@@ -54,26 +55,26 @@ namespace GamingServices
 	};
 
 	/**
-	 * Backend handle for a session that was discovered through FindSessions (or a lobby invite).
-	 * Owns the EOS_HSessionDetails handle and releases it on destruction, exactly as the legacy
-	 * FEOSSessionJoinHandle did.
+	 * Backend handle for a lobby discovered through FindSessions or a lobby invite. Owns the
+	 * EOS_HLobbyDetails handle and releases it on destruction.
 	 *
 	 * Lives in private infra (this header) rather than the SDK-free EOSPlatformCore.h so the core header
-	 * does not leak the EOS SDK. The matchmaking capability and the session-invite notification create it.
+	 * does not leak the EOS SDK. The matchmaking capability and the lobby-invite notification create it.
 	 */
 	struct FEOSSessionJoinHandle : public ISessionJoinHandle
 	{
-		EOS_HSessionDetails Handle = nullptr;
+		EOS_HLobbyDetails Handle = nullptr;
+		FString LobbyId;
 		FString SessionName;
 
-		FEOSSessionJoinHandle(EOS_HSessionDetails InHandle, const FString& InSessionName)
-			: Handle(InHandle), SessionName(InSessionName) {}
+		FEOSSessionJoinHandle(EOS_HLobbyDetails InHandle, const FString& InLobbyId, const FString& InSessionName)
+			: Handle(InHandle), LobbyId(InLobbyId), SessionName(InSessionName) {}
 
 		~FEOSSessionJoinHandle()
 		{
 			if (Handle)
 			{
-				EOS_SessionDetails_Release(Handle);
+				EOS_LobbyDetails_Release(Handle);
 				Handle = nullptr;
 			}
 		}
@@ -94,7 +95,10 @@ namespace GamingServices
 
 		if (EOSPlayerAchievement)
 		{
-			GameAchievement.bIsUnlocked = (EOSPlayerAchievement->UnlockTime != 0);
+			// Locked achievements report EOS_ACHIEVEMENTS_ACHIEVEMENT_UNLOCKTIME_UNDEFINED (-1), so a
+			// plain "!= 0" check would read locked as unlocked.
+			GameAchievement.bIsUnlocked =
+				(EOSPlayerAchievement->UnlockTime != EOS_ACHIEVEMENTS_ACHIEVEMENT_UNLOCKTIME_UNDEFINED);
 			GameAchievement.Progress = EOSPlayerAchievement->Progress;
 		}
 	}
@@ -104,7 +108,13 @@ namespace GamingServices
 	{
 		if (EOSRecord)
 		{
-			Entry.UserId = UTF8_TO_TCHAR(EOSRecord->UserId);
+			// Record->UserId is an EOS_ProductUserId handle, not a string; stringify it properly.
+			char PuidStr[EOS_PRODUCTUSERID_MAX_LENGTH + 1];
+			int32_t PuidLen = sizeof(PuidStr);
+			if (EOS_ProductUserId_ToString(EOSRecord->UserId, PuidStr, &PuidLen) == EOS_EResult::EOS_Success)
+			{
+				Entry.UserId = UTF8_TO_TCHAR(PuidStr);
+			}
 			Entry.DisplayName = UTF8_TO_TCHAR(EOSRecord->UserDisplayName);
 			Entry.Score = EOSRecord->Score;
 			Entry.Rank = EOSRecord->Rank;

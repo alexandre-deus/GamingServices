@@ -4,8 +4,8 @@
 
 #include "CoreMinimal.h"
 #include "DataTypes/ConnectTypes.h"
+#include "DataTypes/GamingServiceResult.h"
 #include "DataTypes/LoginTypes.h"
-#include "DataTypes/SessionTypes.h"
 #include "Templates/PimplPtr.h"
 
 namespace GamingServices
@@ -31,8 +31,9 @@ namespace GamingServices
 		FEOSPlatformCore();
 		~FEOSPlatformCore();
 
-		// Platform lifecycle.
-		void InitializePlatform();
+		// Platform lifecycle. Any non-empty field in Overrides wins over its [GamingServices.EOS] config
+		// value, so a test harness can point each local instance at a different EOS client.
+		void InitializePlatform(const FEOSInitOptions& Overrides = FEOSInitOptions());
 		void DestroyPlatform();
 		void Tick();
 
@@ -53,8 +54,10 @@ namespace GamingServices
 		void* GetLeaderboardsHandle() const;
 		void* GetStatsHandle() const;
 		void* GetPlayerDataStorageHandle() const;
-		void* GetSessionsHandle() const;
+		void* GetLobbyHandle() const;
 		void* GetEcomHandle() const;
+		void* GetConnectHandle() const;
+		void* GetUserInfoHandle() const;
 
 		void* GetEpicAccountId() const;
 		void* GetProductUserId() const;
@@ -72,14 +75,6 @@ namespace GamingServices
 		void SetTempStoragePath(const FString& InPath);
 		const FString& GetTempStoragePath() const { return TempStoragePath; }
 
-		// Session bookkeeping shared between matchmaking and the connection-string helper.
-		bool bIsInSession = false;
-		bool bIsSessionHost = false;
-		FString CurrentSessionName;
-		FSessionSettings CurrentSessionSettings;
-
-		FString GetSessionConnectionString() const;
-
 		// Cloud sync entry points (driven from login + shutdown). Implemented by FEOSCloudStorage but
 		// invoked through this core, so the core holds settable hooks the capability wires up. Kept in the
 		// core because the sync ordering is owned by the login / shutdown sequence: SyncFromCloudHook fires
@@ -88,15 +83,15 @@ namespace GamingServices
 		TFunction<void(TFunction<void(const FGamingServiceResult&)>)> SyncFromCloudHook;
 		TFunction<void(TFunction<void(const FGamingServiceResult&)>)> SyncToCloudHook;
 
-		// Session-invite notification hooks owned by FEOSMatchmaking. The matchmaking capability conceptually
-		// owns the invite notification, but its registration needs the sessions handle + ProductUserId that
-		// only exist after login, and its teardown must happen during core Shutdown. So the core fires these
-		// hooks at the right points in the login / shutdown sequence and matchmaking does the actual
-		// EOS_Sessions_AddNotifySessionInviteAccepted / Remove work (and fires its own OnLobbyInviteAccepted
-		// sink directly). RegisterSessionInviteNotificationHook fires at the end of CompleteAuthentication;
-		// UnregisterSessionInviteNotificationHook fires during Shutdown.
-		TFunction<void()> RegisterSessionInviteNotificationHook;
-		TFunction<void()> UnregisterSessionInviteNotificationHook;
+		// Matchmaking notification hooks owned by FEOSMatchmaking (lobby invite-accepted + member-status).
+		// The matchmaking capability conceptually owns them, but their registration needs the lobby handle +
+		// ProductUserId that only exist after login, and their teardown must happen during core Shutdown. So
+		// the core fires these hooks at the right points in the login / shutdown sequence and matchmaking
+		// does the actual EOS_Lobby_AddNotify* / RemoveNotify* work (and fires its own sinks directly).
+		// RegisterMatchmakingNotificationsHook fires at the end of CompleteAuthentication;
+		// UnregisterMatchmakingNotificationsHook fires during Shutdown.
+		TFunction<void()> RegisterMatchmakingNotificationsHook;
+		TFunction<void()> UnregisterMatchmakingNotificationsHook;
 
 	private:
 		struct FImpl;
@@ -113,6 +108,10 @@ namespace GamingServices
 		void ConnectLogin(void* EpicAccountId, TFunction<void(const FGamingServiceResult&)> Callback);
 		void CreateUser(struct FEOSCorePlatformLoginCtx* Ctx, void* ContinuanceToken) const;
 		void CompleteAuthentication(void* InProductUserId, struct FEOSCorePlatformLoginCtx* AuthCtx);
+
+		// Resolves the logged-in account's display name into DisplayName. Best-effort: always calls
+		// OnComplete, success or not, so the login sequence never stalls on it.
+		void QueryDisplayName(TFunction<void()> OnComplete);
 
 		void LoadAchievementDefinitions(TFunction<void(const bool&)> OnComplete);
 		void LoadLeaderboardDefinitions(TFunction<void(const bool&)> OnComplete);

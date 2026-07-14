@@ -30,6 +30,9 @@ namespace GamingServices
 		virtual FString GetUserId() const override;
 		virtual FString GetDisplayName() const override;
 
+		virtual void ResolveDisplayName(const FString& UserId,
+		                                TFunction<void(const FResolveDisplayNameResult&)> Callback) override;
+
 		virtual UTexture2D* GetAvatar() const override;
 		virtual UTexture2D* GetAvatarByUserId(const FString& UserId) const override;
 

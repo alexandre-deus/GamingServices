@@ -38,7 +38,7 @@ public:
 	FLeaderboardQueriedPin Completed;
 
 	UFUNCTION(BlueprintCallable, Category = "GamingServices|Leaderboards", meta = (BlueprintInternalUseOnly = "true", WorldContext = "WorldContextObject"))
-	static UAsyncAction_QueryLeaderboardPage* QueryLeaderboardPage(UObject* WorldContextObject, const FString& LeaderboardId, int32 Limit, int32 ContinuationToken);
+	static UAsyncAction_QueryLeaderboardPage* QueryLeaderboardPage(UObject* WorldContextObject, const FString& LeaderboardId, int32 Limit, int32 Offset);
 
 	virtual void Activate() override;
 
@@ -50,5 +50,23 @@ private:
 	int32 Limit = 0;
 
 	UPROPERTY()
-	int32 ContinuationToken = 0;
+	int32 Offset = 0;
+};
+
+UCLASS()
+class GAMINGSERVICES_API UAsyncAction_QueryLeaderboardUserRank : public UGamingServiceAsyncAction
+{
+	GENERATED_BODY()
+public:
+	UPROPERTY(BlueprintAssignable)
+	FLeaderboardQueriedPin Completed;
+
+	UFUNCTION(BlueprintCallable, Category = "GamingServices|Leaderboards", meta = (BlueprintInternalUseOnly = "true", WorldContext = "WorldContextObject"))
+	static UAsyncAction_QueryLeaderboardUserRank* QueryLeaderboardUserRank(UObject* WorldContextObject, const FString& LeaderboardId);
+
+	virtual void Activate() override;
+
+private:
+	UPROPERTY()
+	FString LeaderboardId;
 };

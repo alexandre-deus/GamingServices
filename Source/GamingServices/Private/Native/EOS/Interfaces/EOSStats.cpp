@@ -4,6 +4,8 @@
 #include "Native/EOS/EOSPlatformCore.h"
 #include "EOSCallbackContext.h"
 
+#include <string>
+
 namespace GamingServices
 {
 	using FStatIngestCallbackCtx = TEOSCallbackContext<FGamingServiceResult, FEOSStats>;
@@ -34,9 +36,13 @@ namespace GamingServices
 		IngestOptions.TargetUserId = ProductUserId(Core);
 		IngestOptions.StatsCount = 1;
 
+		// Must outlive the EOS_Stats_IngestStat call below; assigning TCHAR_TO_UTF8() directly leaves
+		// a dangling pointer.
+		const std::string StatNameUtf8 = TCHAR_TO_UTF8(*StatName);
+
 		EOS_Stats_IngestData Stat = {};
 		Stat.ApiVersion = EOS_STATS_INGESTDATA_API_LATEST;
-		Stat.StatName = TCHAR_TO_UTF8(*StatName);
+		Stat.StatName = StatNameUtf8.c_str();
 		Stat.IngestAmount = Amount;
 
 		IngestOptions.Stats = &Stat;
@@ -83,10 +89,17 @@ namespace GamingServices
 		Ctx->Callback = MoveTemp(Callback);
 		Ctx->StatName = StatName;
 
+		// Query the requested stat by name: EOS returns an empty set when StatNames is omitted,
+		// so the previous query-everything approach never found anything.
+		const std::string StatNameUtf8 = TCHAR_TO_UTF8(*StatName);
+		const char* StatNames[] = {StatNameUtf8.c_str()};
+
 		EOS_Stats_QueryStatsOptions QueryOptions = {};
 		QueryOptions.ApiVersion = EOS_STATS_QUERYSTATS_API_LATEST;
 		QueryOptions.LocalUserId = ProductUserId(Core);
 		QueryOptions.TargetUserId = ProductUserId(Core);
+		QueryOptions.StatNames = StatNames;
+		QueryOptions.StatNamesCount = 1;
 		QueryOptions.StartTime = EOS_STATS_TIME_UNDEFINED;
 		QueryOptions.EndTime = EOS_STATS_TIME_UNDEFINED;
 

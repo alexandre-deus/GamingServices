@@ -4,6 +4,8 @@
 #include "Native/EOS/EOSPlatformCore.h"
 #include "EOSCallbackContext.h"
 
+#include <string>
+
 namespace GamingServices
 {
 	using FAchievementUnlockCallbackCtx = TEOSCallbackContext<FGamingServiceResult, FEOSAchievements>;
@@ -32,7 +34,10 @@ namespace GamingServices
 		UnlockOptions.ApiVersion = EOS_ACHIEVEMENTS_UNLOCKACHIEVEMENTS_API_LATEST;
 		UnlockOptions.UserId = ProductUserId(Core);
 
-		const char* AchievementIds[] = {TCHAR_TO_UTF8(*AchievementId)};
+		// Must outlive the EOS_Achievements_UnlockAchievements call below; assigning TCHAR_TO_UTF8()
+		// directly leaves a dangling pointer.
+		const std::string AchievementIdUtf8 = TCHAR_TO_UTF8(*AchievementId);
+		const char* AchievementIds[] = {AchievementIdUtf8.c_str()};
 		UnlockOptions.AchievementIds = AchievementIds;
 		UnlockOptions.AchievementsCount = 1;
 
@@ -100,9 +105,29 @@ namespace GamingServices
 						static_cast<const EOS_Achievements_DefinitionV2*>(DefinitionPtr);
 					if (Definition)
 					{
+						// The player query above cached this user's progress; copy it per achievement so
+						// bIsUnlocked / Progress reflect the player, not just the bare definition.
+						EOS_Achievements_CopyPlayerAchievementByAchievementIdOptions CopyOptions = {};
+						CopyOptions.ApiVersion = EOS_ACHIEVEMENTS_COPYPLAYERACHIEVEMENTBYACHIEVEMENTID_API_LATEST;
+						CopyOptions.TargetUserId = ProductUserId(Self->Core);
+						CopyOptions.LocalUserId = ProductUserId(Self->Core);
+						CopyOptions.AchievementId = Definition->AchievementId;
+
+						EOS_Achievements_PlayerAchievement* PlayerAchievement = nullptr;
+						if (EOS_Achievements_CopyPlayerAchievementByAchievementId(
+							AchievementsHandle(Self->Core), &CopyOptions, &PlayerAchievement) != EOS_EResult::EOS_Success)
+						{
+							PlayerAchievement = nullptr;
+						}
+
 						FGameAchievement GameAchievement;
-						ConvertEOSAchievementToGameAchievement(Definition, nullptr, GameAchievement);
+						ConvertEOSAchievementToGameAchievement(Definition, PlayerAchievement, GameAchievement);
 						Achievements.Add(GameAchievement);
+
+						if (PlayerAchievement)
+						{
+							EOS_Achievements_PlayerAchievement_Release(PlayerAchievement);
+						}
 					}
 				}
 

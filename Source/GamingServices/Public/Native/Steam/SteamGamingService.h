@@ -29,7 +29,7 @@ namespace GamingServices
 		FSteamGamingService();
 		virtual ~FSteamGamingService() override;
 
-		virtual void InitializePlatform() override;
+		virtual void InitializePlatform(const FGamingServiceConnectParams& Params) override;
 		virtual void DestroyPlatform() override;
 		virtual void Tick() override;
 		virtual bool IsInitialized() const override;

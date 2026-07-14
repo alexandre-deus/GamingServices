@@ -11,6 +11,8 @@
 #include "Serialization/JsonWriter.h"
 #include "Dom/JsonObject.h"
 
+#include <string>
+
 namespace GamingServices
 {
 	using FFileStorageCallbackCtx = TEOSCallbackContext<FGamingServiceResult, FEOSCloudStorage>;
@@ -328,10 +330,14 @@ namespace GamingServices
 		Ctx->FileName = FileName;
 		Ctx->DownloadCallback = MoveTemp(Callback);
 
+		// Must outlive the EOS_PlayerDataStorage_ReadFile call below; assigning TCHAR_TO_UTF8()
+		// directly leaves a dangling pointer.
+		const std::string FileNameUtf8 = TCHAR_TO_UTF8(*FileName);
+
 		EOS_PlayerDataStorage_ReadFileOptions ReadOptions = {};
 		ReadOptions.ApiVersion = 1;
 		ReadOptions.LocalUserId = ProductUserId(Core);
-		ReadOptions.Filename = TCHAR_TO_UTF8(*FileName);
+		ReadOptions.Filename = FileNameUtf8.c_str();
 		ReadOptions.ReadChunkLengthBytes = 1024 * 1024;
 		ReadOptions.ReadFileDataCallback = [](
 			const EOS_PlayerDataStorage_ReadFileDataCallbackInfo* Data) -> EOS_PlayerDataStorage_EReadResult
@@ -395,10 +401,14 @@ namespace GamingServices
 		Ctx->FileName = FileName;
 		Ctx->UploadCallback = MoveTemp(Callback);
 
+		// Must outlive the EOS_PlayerDataStorage_WriteFile call below; assigning TCHAR_TO_UTF8()
+		// directly leaves a dangling pointer.
+		const std::string FileNameUtf8 = TCHAR_TO_UTF8(*FileName);
+
 		EOS_PlayerDataStorage_WriteFileOptions WriteOptions = {};
 		WriteOptions.ApiVersion = 1;
 		WriteOptions.LocalUserId = ProductUserId(Core);
-		WriteOptions.Filename = TCHAR_TO_UTF8(*FileName);
+		WriteOptions.Filename = FileNameUtf8.c_str();
 		WriteOptions.ChunkLengthBytes = 4096;
 		WriteOptions.WriteFileDataCallback = [](const EOS_PlayerDataStorage_WriteFileDataCallbackInfo* Data,
 		                                        void* OutDataBuffer,
@@ -564,10 +574,14 @@ namespace GamingServices
 		Ctx->FileName = FileName;
 		Ctx->DeleteCallback = MoveTemp(Callback);
 
+		// Must outlive the EOS_PlayerDataStorage_DeleteFile call below; assigning TCHAR_TO_UTF8()
+		// directly leaves a dangling pointer.
+		const std::string FileNameUtf8 = TCHAR_TO_UTF8(*FileName);
+
 		EOS_PlayerDataStorage_DeleteFileOptions DeleteOptions = {};
 		DeleteOptions.ApiVersion = 1;
 		DeleteOptions.LocalUserId = ProductUserId(Core);
-		DeleteOptions.Filename = TCHAR_TO_UTF8(*FileName);
+		DeleteOptions.Filename = FileNameUtf8.c_str();
 
 		EOS_PlayerDataStorage_DeleteFile(
 			PlayerDataStorageHandle(Core),

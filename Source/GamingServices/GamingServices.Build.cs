@@ -73,7 +73,10 @@ public class GamingServices : ModuleRules
 
             PublicAdditionalLibraries.Add(lib);
             PublicDelayLoadDLLs.Add("EOSSDK-Win64-Shipping.dll");
-            RuntimeDependencies.Add("$(TargetOutputDir)/EOSSDK-Win64-Shipping.dll", dll);
+            // Stage relative to the project, not $(TargetOutputDir): for Editor targets the output
+            // dir is the ENGINE binaries folder, where the engine's own bundled EOSSDK module also
+            // stages this dll, and the conflicting sources fail the build.
+            RuntimeDependencies.Add("$(ProjectDir)/Binaries/Win64/EOSSDK-Win64-Shipping.dll", dll);
 
             ForceCopy(dll, outDir, "EOSSDK-Win64-Shipping.dll");
         }
@@ -214,7 +217,16 @@ public class GamingServices : ModuleRules
             "OnlineSubsystemUtils",
         });
 
-        const EServiceBackends backend = EServiceBackends.Steamworks;
+        // Default backend for shipping builds. The GAMINGSERVICES_BACKEND environment variable
+        // overrides it at build time (used by the isolated test harness to select EOS without
+        // touching source): Steamworks | EpicOnlineServices | Null.
+        EServiceBackends backend = EServiceBackends.Steamworks;
+        string backendEnv = Environment.GetEnvironmentVariable("GAMINGSERVICES_BACKEND");
+        if (!string.IsNullOrEmpty(backendEnv) && Enum.TryParse(backendEnv, true, out EServiceBackends parsedBackend))
+        {
+            backend = parsedBackend;
+            Console.WriteLine($"[GamingServices] Backend overridden by GAMINGSERVICES_BACKEND={backendEnv}");
+        }
 
         Console.WriteLine($"[GamingServices] Selected backend: {backend}");
 

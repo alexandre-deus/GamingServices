@@ -232,27 +232,28 @@ namespace GamingServices
 			}
 
 			CSteamID ChangedUser(pParam->m_ulSteamIDUserChanged);
+			// Id-only event, consistent across backends: the member's display name is resolved on
+			// demand via IUserService::ResolveDisplayName(UserId), not carried in the event.
 			FString ChangedUserId = FString::Printf(TEXT("%llu"), ChangedUser.ConvertToUint64());
-			FString ChangedDisplayName = SteamFriends() ? UTF8_TO_TCHAR(SteamFriends()->GetFriendPersonaName(ChangedUser)) : TEXT("Unknown");
 
 			if (pParam->m_rgfChatMemberStateChange & k_EChatMemberStateChangeEntered)
 			{
 				CurrentLobbyMembers.Add(ChangedUser.ConvertToUint64());
 				User.EnsureAvatarForMember(ChangedUser.ConvertToUint64());
-				UE_LOG(LogTemp, Log, TEXT("SteamworksGamingService: User joined lobby: %s (%s)"), *ChangedDisplayName, *ChangedUserId);
+				UE_LOG(LogTemp, Log, TEXT("SteamworksGamingService: User joined lobby: %s"), *ChangedUserId);
 				if (Owner.OnSessionUserJoined)
 				{
-					Owner.OnSessionUserJoined(FSessionMemberInfo(ChangedUserId, ChangedDisplayName));
+					Owner.OnSessionUserJoined(FSessionMemberInfo(ChangedUserId, ChangedUserId));
 				}
 			}
 
 			if (pParam->m_rgfChatMemberStateChange & (k_EChatMemberStateChangeLeft | k_EChatMemberStateChangeDisconnected | k_EChatMemberStateChangeKicked | k_EChatMemberStateChangeBanned))
 			{
 				CurrentLobbyMembers.Remove(ChangedUser.ConvertToUint64());
-				UE_LOG(LogTemp, Log, TEXT("SteamworksGamingService: User left lobby: %s (%s)"), *ChangedDisplayName, *ChangedUserId);
+				UE_LOG(LogTemp, Log, TEXT("SteamworksGamingService: User left lobby: %s"), *ChangedUserId);
 				if (Owner.OnSessionUserLeft)
 				{
-					Owner.OnSessionUserLeft(FSessionMemberInfo(ChangedUserId, ChangedDisplayName));
+					Owner.OnSessionUserLeft(FSessionMemberInfo(ChangedUserId, ChangedUserId));
 				}
 
 				// Two cases mean the lobby has effectively ended for us and our cached state must

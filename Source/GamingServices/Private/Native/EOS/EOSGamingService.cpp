@@ -30,9 +30,9 @@ namespace GamingServices
 
 	FEOSGamingService::~FEOSGamingService() = default;
 
-	void FEOSGamingService::InitializePlatform()
+	void FEOSGamingService::InitializePlatform(const FGamingServiceConnectParams& Params)
 	{
-		Core->InitializePlatform();
+		Core->InitializePlatform(Params.EOS);
 	}
 
 	void FEOSGamingService::DestroyPlatform()

@@ -23,8 +23,10 @@ namespace GamingServices
 
 		virtual void WriteLeaderboardScore(const FString& LeaderboardId, int32 Score,
 		                                   TFunction<void(const FGamingServiceResult&)> Callback) override;
-		virtual void QueryLeaderboardPage(const FString& LeaderboardId, int32 Limit, int32 ContinuationToken,
+		virtual void QueryLeaderboardPage(const FString& LeaderboardId, int32 Limit, int32 Offset,
 		                                  TFunction<void(const FLeaderboardResult&)> Callback) override;
+		virtual void QueryLeaderboardUserRank(const FString& LeaderboardId,
+		                                      TFunction<void(const FLeaderboardResult&)> Callback) override;
 
 	private:
 		FEOSPlatformCore& Core;

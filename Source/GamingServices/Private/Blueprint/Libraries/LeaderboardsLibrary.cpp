@@ -31,13 +31,13 @@ void UAsyncAction_WriteLeaderboardScore::Activate()
 	});
 }
 
-UAsyncAction_QueryLeaderboardPage* UAsyncAction_QueryLeaderboardPage::QueryLeaderboardPage(UObject* WorldContextObject, const FString& LeaderboardId, int32 Limit, int32 ContinuationToken)
+UAsyncAction_QueryLeaderboardPage* UAsyncAction_QueryLeaderboardPage::QueryLeaderboardPage(UObject* WorldContextObject, const FString& LeaderboardId, int32 Limit, int32 Offset)
 {
 	UAsyncAction_QueryLeaderboardPage* Action = NewObject<UAsyncAction_QueryLeaderboardPage>();
 	Action->WorldContext = WorldContextObject;
 	Action->LeaderboardId = LeaderboardId;
 	Action->Limit = Limit;
-	Action->ContinuationToken = ContinuationToken;
+	Action->Offset = Offset;
 	return Action;
 }
 
@@ -53,7 +53,34 @@ void UAsyncAction_QueryLeaderboardPage::Activate()
 	}
 
 	KeepAlive();
-	Leaderboards->QueryLeaderboardPage(LeaderboardId, Limit, ContinuationToken, [this](const FLeaderboardResult& Result)
+	Leaderboards->QueryLeaderboardPage(LeaderboardId, Limit, Offset, [this](const FLeaderboardResult& Result)
+	{
+		Completed.Broadcast(Result);
+		SetReadyToDestroy();
+	});
+}
+
+UAsyncAction_QueryLeaderboardUserRank* UAsyncAction_QueryLeaderboardUserRank::QueryLeaderboardUserRank(UObject* WorldContextObject, const FString& LeaderboardId)
+{
+	UAsyncAction_QueryLeaderboardUserRank* Action = NewObject<UAsyncAction_QueryLeaderboardUserRank>();
+	Action->WorldContext = WorldContextObject;
+	Action->LeaderboardId = LeaderboardId;
+	return Action;
+}
+
+void UAsyncAction_QueryLeaderboardUserRank::Activate()
+{
+	IGamingService* Service = ResolveService();
+	ILeaderboardsService* Leaderboards = Service ? Service->GetLeaderboards() : nullptr;
+	if (!Leaderboards)
+	{
+		Completed.Broadcast(FLeaderboardResult(false));
+		SetReadyToDestroy();
+		return;
+	}
+
+	KeepAlive();
+	Leaderboards->QueryLeaderboardUserRank(LeaderboardId, [this](const FLeaderboardResult& Result)
 	{
 		Completed.Broadcast(Result);
 		SetReadyToDestroy();

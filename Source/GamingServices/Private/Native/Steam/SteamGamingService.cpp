@@ -30,8 +30,9 @@ namespace GamingServices
 
 	FSteamGamingService::~FSteamGamingService() = default;
 
-	void FSteamGamingService::InitializePlatform()
+	void FSteamGamingService::InitializePlatform(const FGamingServiceConnectParams& Params)
 	{
+		// Steamworks has no per-instance credential overrides (FSteamworksInitOptions is empty).
 		Core->InitializePlatform();
 	}
 

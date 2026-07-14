@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "DataTypes/ConnectTypes.h"
 #include "Native/GamingCapability.h"
 
 class IAchievementsService;
@@ -32,8 +33,10 @@ class GAMINGSERVICES_API IGamingService
 public:
 	virtual ~IGamingService() = default;
 
-	// Platform lifecycle.
-	virtual void InitializePlatform() {}
+	// Platform lifecycle. Params are optional per-field overrides on top of the ini config: any field
+	// left empty falls back to [GamingServices.<Backend>] in Game.ini. Tests use this to run several
+	// local instances against different backend credentials without touching the config.
+	virtual void InitializePlatform(const FGamingServiceConnectParams& Params = FGamingServiceConnectParams()) {}
 	virtual void DestroyPlatform() {}
 	virtual void Tick() = 0;
 	virtual bool IsInitialized() const = 0;

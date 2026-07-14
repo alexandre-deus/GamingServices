@@ -145,10 +145,14 @@ namespace GamingServices
 					return;
 				}
 
+				// Must outlive the EOS_Ecom_GetEntitlementsByNameCount call below; assigning
+				// TCHAR_TO_UTF8() directly leaves a dangling pointer.
+				const std::string EntitlementNameUtf8 = TCHAR_TO_UTF8(*LocalCtx->EntitlementName);
+
 				EOS_Ecom_GetEntitlementsByNameCountOptions CountOptions = {};
 				CountOptions.ApiVersion = EOS_ECOM_GETENTITLEMENTSBYNAMECOUNT_API_LATEST;
 				CountOptions.LocalUserId = EpicAccountId(Self->Core);
-				CountOptions.EntitlementName = TCHAR_TO_UTF8(*LocalCtx->EntitlementName);
+				CountOptions.EntitlementName = EntitlementNameUtf8.c_str();
 
 				uint32_t Count = EOS_Ecom_GetEntitlementsByNameCount(EcomHandle(Self->Core), &CountOptions);
 				Result.bSuccess = true;
