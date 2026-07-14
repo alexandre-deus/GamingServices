@@ -58,6 +58,7 @@ namespace GamingServices
 		void* GetEcomHandle() const;
 		void* GetConnectHandle() const;
 		void* GetUserInfoHandle() const;
+		void* GetP2PHandle() const;
 
 		void* GetEpicAccountId() const;
 		void* GetProductUserId() const;

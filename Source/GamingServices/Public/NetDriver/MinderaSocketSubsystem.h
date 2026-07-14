@@ -8,14 +8,15 @@
 
 #include "NetDriver/MinderaInternetAddr.h"
 
-class FMinderaSocket;
+class IP2PTransport;
 
 /** Name used to register and retrieve this socket subsystem. */
-#define MINDERA_SOCKET_SUBSYSTEM_NAME FName(TEXT("MinderaSteam"))
+#define MINDERA_SOCKET_SUBSYSTEM_NAME FName(TEXT("MinderaP2P"))
 
 /**
- * Socket subsystem implementation using the Steam Networking Sockets (newer) API.
- * Manages socket creation/destruction, address resolution, and connection-status callbacks.
+ * Socket subsystem for the Mindera P2P netdriver. SDK-free: it creates FMinderaSocket instances over
+ * the active backend's IP2PTransport (fetched from the live IGamingService), and resolves addresses
+ * as peer-id strings. No platform networking SDK appears here.
  */
 class FMinderaSocketSubsystem : public ISocketSubsystem, public FTSTickerObjectBase
 {
@@ -43,7 +44,7 @@ public:
 	virtual TSharedRef<FInternetAddr> CreateInternetAddr() override;
 
 	virtual bool HasNetworkDevice() override { return true; }
-	virtual const TCHAR* GetSocketAPIName() const override { return TEXT("MinderaSteamSockets"); }
+	virtual const TCHAR* GetSocketAPIName() const override { return TEXT("MinderaP2PSockets"); }
 
 	virtual ESocketErrors GetLastErrorCode() override { return static_cast<ESocketErrors>(LastSocketError); }
 	virtual ESocketErrors TranslateErrorCode(int32 Code) override { return static_cast<ESocketErrors>(Code); }
@@ -58,11 +59,11 @@ public:
 	// -- FTSTickerObjectBase --
 	virtual bool Tick(float DeltaTime) override;
 
-	// -- Steam helpers --
-	static ISteamNetworkingSockets* GetSteamSocketsInterface();
+	/** The active backend's P2P transport, from the live IGamingService (null before login / unsupported). */
+	static IP2PTransport* GetTransport();
 
 	/** Last error code set by sockets in this subsystem. */
-	int32 LastSocketError;
+	int32 LastSocketError = 0;
 
 private:
 	static FMinderaSocketSubsystem* SocketSingleton;

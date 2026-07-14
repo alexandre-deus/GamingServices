@@ -25,6 +25,7 @@ namespace GamingServices
 		EOS_HLobby LobbyHandle = nullptr;
 		EOS_HEcom EcomHandle = nullptr;
 		EOS_HUserInfo UserInfoHandle = nullptr;
+		EOS_HP2P P2PHandle = nullptr;
 
 		EOS_EpicAccountId EpicAccountIdCached = nullptr;
 		EOS_ProductUserId ProductUserId = nullptr;
@@ -82,6 +83,7 @@ namespace GamingServices
 	void* FEOSPlatformCore::GetLobbyHandle() const { return Impl->LobbyHandle; }
 	void* FEOSPlatformCore::GetConnectHandle() const { return Impl->ConnectHandle; }
 	void* FEOSPlatformCore::GetUserInfoHandle() const { return Impl->UserInfoHandle; }
+	void* FEOSPlatformCore::GetP2PHandle() const { return Impl->P2PHandle; }
 	void* FEOSPlatformCore::GetEcomHandle() const { return Impl->EcomHandle; }
 
 	void* FEOSPlatformCore::GetEpicAccountId() const { return Impl->EpicAccountIdCached; }
@@ -725,6 +727,7 @@ namespace GamingServices
 		Impl->LobbyHandle = EOS_Platform_GetLobbyInterface(Impl->PlatformHandle);
 		Impl->EcomHandle = EOS_Platform_GetEcomInterface(Impl->PlatformHandle);
 		Impl->UserInfoHandle = EOS_Platform_GetUserInfoInterface(Impl->PlatformHandle);
+		Impl->P2PHandle = EOS_Platform_GetP2PInterface(Impl->PlatformHandle);
 
 		UE_LOG(LogTemp, Log, TEXT("EOSGamingService: EOS platform created successfully"));
 		return true;

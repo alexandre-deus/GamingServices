@@ -43,9 +43,11 @@ namespace GamingServices
 		virtual IRemoteSettingsService* GetRemoteSettings() const override;
 		virtual IMatchmakingService*    GetMatchmaking()    const override;
 		virtual IUserService*           GetUser()           const override;
+		virtual IP2PTransport*          GetP2PTransport()   override;
 
 	private:
 		TUniquePtr<FSteamPlatformCore> Core;
+		TUniquePtr<IP2PTransport> P2PTransport;
 		TUniquePtr<FSteamAchievements> Achievements;
 		TUniquePtr<FSteamEntitlements> Entitlements;
 		TUniquePtr<FSteamLeaderboards> Leaderboards;

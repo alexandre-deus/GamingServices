@@ -9,6 +9,7 @@
 #include "Native/EOS/Interfaces/EOSCloudStorage.h"
 #include "Native/EOS/Interfaces/EOSMatchmaking.h"
 #include "Native/EOS/Interfaces/EOSUser.h"
+#include "Native/EOS/Interfaces/EOSP2PTransport.h"
 
 namespace GamingServices
 {
@@ -37,6 +38,9 @@ namespace GamingServices
 
 	void FEOSGamingService::DestroyPlatform()
 	{
+		// Tear the P2P transport down first: its destructor removes EOS notifications and closes
+		// connections, which must happen while the platform (and its P2P interface) is still alive.
+		P2PTransport.Reset();
 		Core->DestroyPlatform();
 	}
 
@@ -58,6 +62,22 @@ namespace GamingServices
 	IRemoteSettingsService* FEOSGamingService::GetRemoteSettings() const { return RemoteSettings.Get(); }
 	IMatchmakingService*    FEOSGamingService::GetMatchmaking()    const { return Matchmaking.Get(); }
 	IUserService*           FEOSGamingService::GetUser()           const { return User.Get(); }
+
+	IP2PTransport* FEOSGamingService::GetP2PTransport()
+	{
+		// Lazily created once we can address peers: needs the P2P interface handle and the local
+		// ProductUserId, both of which exist only after login completes.
+		if (!P2PTransport)
+		{
+			void* P2PHandle = Core->GetP2PHandle();
+			void* LocalUser = Core->GetProductUserId();
+			if (P2PHandle && LocalUser)
+			{
+				P2PTransport = MakeUnique<FEOSP2PTransport>(P2PHandle, LocalUser);
+			}
+		}
+		return P2PTransport.Get();
+	}
 }
 
 #endif // USE_EOS

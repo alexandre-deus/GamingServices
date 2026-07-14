@@ -4,7 +4,8 @@
 #include "Native/GamingServiceFactory.h"
 #include "Native/Null/NullGamingService.h"
 
-#ifdef USE_STEAMWORKS
+#if defined(USE_STEAMWORKS) || defined(USE_EOS)
+#define MINDERA_P2P_NETDRIVER 1
 #include "SocketSubsystemModule.h"
 #include "NetDriver/MinderaSocketSubsystem.h"
 #endif
@@ -28,7 +29,7 @@ void FGamingServicesModule::StartupModule()
 
 	Service->InitializePlatform();
 
-#ifdef USE_STEAMWORKS
+#ifdef MINDERA_P2P_NETDRIVER
 	if (bUseRealService)
 	{
 		FMinderaSocketSubsystem* SocketSubsystem = FMinderaSocketSubsystem::Create();
@@ -40,11 +41,11 @@ void FGamingServicesModule::StartupModule()
 				bSocketSubsystemEnabled = true;
 				FSocketSubsystemModule& SSModule = FModuleManager::LoadModuleChecked<FSocketSubsystemModule>(TEXT("Sockets"));
 				SSModule.RegisterSocketSubsystem(MINDERA_SOCKET_SUBSYSTEM_NAME, SocketSubsystem, false);
-				UE_LOG(LogTemp, Log, TEXT("GamingServices: Registered MinderaSteam socket subsystem"));
+				UE_LOG(LogTemp, Log, TEXT("GamingServices: Registered Mindera P2P socket subsystem"));
 			}
 			else
 			{
-				UE_LOG(LogTemp, Warning, TEXT("GamingServices: Failed to init MinderaSteam socket subsystem: %s"), *Error);
+				UE_LOG(LogTemp, Warning, TEXT("GamingServices: Failed to init Mindera P2P socket subsystem: %s"), *Error);
 				FMinderaSocketSubsystem::Destroy();
 			}
 		}
@@ -61,7 +62,7 @@ void FGamingServicesModule::StartupModule()
 
 void FGamingServicesModule::TearDownPlatform()
 {
-#ifdef USE_STEAMWORKS
+#ifdef MINDERA_P2P_NETDRIVER
 	if (bSocketSubsystemEnabled)
 	{
 		FModuleManager& ModuleManager = FModuleManager::Get();
@@ -71,7 +72,7 @@ void FGamingServicesModule::TearDownPlatform()
 			SSModule.UnregisterSocketSubsystem(MINDERA_SOCKET_SUBSYSTEM_NAME);
 		}
 		FMinderaSocketSubsystem::Destroy();
-		UE_LOG(LogTemp, Log, TEXT("GamingServices: Unregistered MinderaSteam socket subsystem"));
+		UE_LOG(LogTemp, Log, TEXT("GamingServices: Unregistered Mindera P2P socket subsystem"));
 		bSocketSubsystemEnabled = false;
 	}
 #endif

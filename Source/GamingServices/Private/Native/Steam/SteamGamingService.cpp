@@ -11,6 +11,7 @@
 #include "Native/Steam/Interfaces/SteamCloudStorage.h"
 #include "Native/Steam/Interfaces/SteamMatchmaking.h"
 #include "Native/Steam/Interfaces/SteamUser.h"
+#include "Native/Steam/Interfaces/SteamP2PTransport.h"
 
 namespace GamingServices
 {
@@ -38,6 +39,8 @@ namespace GamingServices
 
 	void FSteamGamingService::DestroyPlatform()
 	{
+		// Tear the transport down before SteamAPI shuts down: its destructor closes sockets/connections.
+		P2PTransport.Reset();
 		Core->DestroyPlatform();
 	}
 
@@ -60,6 +63,17 @@ namespace GamingServices
 	IRemoteSettingsService* FSteamGamingService::GetRemoteSettings() const { return RemoteSettings.Get(); }
 	IMatchmakingService*    FSteamGamingService::GetMatchmaking()    const { return Matchmaking.Get(); }
 	IUserService*           FSteamGamingService::GetUser()           const { return User.Get(); }
+
+	IP2PTransport* FSteamGamingService::GetP2PTransport()
+	{
+		// Steam networking is available as soon as SteamAPI is up (no explicit login step), so create
+		// the transport lazily on first request.
+		if (!P2PTransport && IsInitialized())
+		{
+			P2PTransport = MakeUnique<FSteamP2PTransport>();
+		}
+		return P2PTransport.Get();
+	}
 }
 
 #endif // USE_STEAMWORKS

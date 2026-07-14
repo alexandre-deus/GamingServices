@@ -12,6 +12,7 @@ class ICloudStorageService;
 class IRemoteSettingsService;
 class IMatchmakingService;
 class IUserService;
+class IP2PTransport;
 
 /**
  * Native (non-UObject) interface for the OOP gaming-service abstraction.
@@ -50,6 +51,13 @@ public:
 	virtual IRemoteSettingsService* GetRemoteSettings() const { return nullptr; }
 	virtual IMatchmakingService*    GetMatchmaking()    const { return nullptr; }
 	virtual IUserService*           GetUser()           const { return nullptr; }
+
+	/**
+	 * P2P networking transport for this backend (Steam / EOS), or null when unsupported or not ready
+	 * (e.g. before login). Created lazily once the platform can address peers. SDK-free interface, so
+	 * this stays out of the platform SDKs; the netdriver and tests drive it directly.
+	 */
+	virtual IP2PTransport* GetP2PTransport() { return nullptr; }
 
 	/** Flat capability snapshot, derived from the accessors above (single source of truth). */
 	FGamingServiceCapabilities GetCapabilities() const
