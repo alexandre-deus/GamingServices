@@ -62,6 +62,19 @@ void FGamingServicesModule::StartupModule()
 
 void FGamingServicesModule::TearDownPlatform()
 {
+	// Only the platform SDK is torn down on pre-exit (for a clean Steam disconnect). The socket
+	// subsystem is deliberately left registered: net-driver UObjects are destroyed later by GC and
+	// still call GetSocketSubsystem() during their teardown — unregistering here would null that out
+	// and crash. It is unregistered in ShutdownModule instead, after GC has run.
+	if (Service)
+	{
+		Service->DestroyPlatform();
+		Service.Reset();
+	}
+}
+
+void FGamingServicesModule::TearDownSocketSubsystem()
+{
 #ifdef MINDERA_P2P_NETDRIVER
 	if (bSocketSubsystemEnabled)
 	{
@@ -76,12 +89,6 @@ void FGamingServicesModule::TearDownPlatform()
 		bSocketSubsystemEnabled = false;
 	}
 #endif
-
-	if (Service)
-	{
-		Service->DestroyPlatform();
-		Service.Reset();
-	}
 }
 
 void FGamingServicesModule::ShutdownModule()
@@ -92,7 +99,9 @@ void FGamingServicesModule::ShutdownModule()
 		PreExitHandle.Reset();
 	}
 
-	// Safety net: if OnEnginePreExit never fired (e.g. abnormal teardown path),
-	// still tear the platform down here.
+	// Safety net: if OnEnginePreExit never fired (e.g. abnormal teardown path), still tear the platform
+	// down here. Then unregister the socket subsystem — by now the engine has GC'd its net drivers, so
+	// nothing will call GetSocketSubsystem() after this.
 	TearDownPlatform();
+	TearDownSocketSubsystem();
 }

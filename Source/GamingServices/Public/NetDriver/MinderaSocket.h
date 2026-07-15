@@ -17,7 +17,7 @@ class IP2PTransport;
 class FMinderaSocket : public FSocket
 {
 public:
-	FMinderaSocket(IP2PTransport* InTransport, ESocketType InSocketType, const FString& InSocketDescription, const FName& InSocketProtocol);
+	FMinderaSocket(ESocketType InSocketType, const FString& InSocketDescription, const FName& InSocketProtocol);
 	virtual ~FMinderaSocket();
 
 	// -- FSocket interface --
@@ -66,7 +66,9 @@ public:
 	int32 GetChannel() const { return Channel; }
 
 private:
-	IP2PTransport* Transport = nullptr;
+	/** Fetched live (never cached) so a socket destroyed after platform teardown never touches a freed transport. */
+	static IP2PTransport* GetTransport();
+
 	int32 Channel = 0;
 	FInternetAddrMindera BoundAddr;
 	FInternetAddrMindera PeerAddr;

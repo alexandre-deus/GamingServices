@@ -39,7 +39,7 @@ IP2PTransport* FMinderaSocketSubsystem::GetTransport()
 {
 	if (FGamingServicesModule* Module = FModuleManager::GetModulePtr<FGamingServicesModule>(TEXT("GamingServices")))
 	{
-		return Module->GetService().GetP2PTransport();
+		return Module->GetP2PTransportOrNull();
 	}
 	return nullptr;
 }
@@ -55,13 +55,12 @@ void FMinderaSocketSubsystem::Shutdown()
 
 FSocket* FMinderaSocketSubsystem::CreateSocket(const FName& SocketType, const FString& SocketDescription, const FName& ProtocolType)
 {
-	IP2PTransport* Transport = GetTransport();
-	if (!Transport)
+	if (!GetTransport())
 	{
 		UE_LOG(LogMinderaSocketSub, Warning, TEXT("[SubSys] CreateSocket: no P2P transport available (not logged in?)"));
 		return nullptr;
 	}
-	return new FMinderaSocket(Transport, SOCKTYPE_Datagram, SocketDescription, ProtocolType);
+	return new FMinderaSocket(SOCKTYPE_Datagram, SocketDescription, ProtocolType);
 }
 
 void FMinderaSocketSubsystem::DestroySocket(FSocket* Socket)

@@ -7,15 +7,22 @@
 #include "NetDriver/MinderaInternetAddr.h"
 #include "MinderaNetDriver.generated.h"
 
-class FMinderaSocket;
 class IP2PTransport;
 
 /**
- * P2P net driver over an IP2PTransport (Steam / EOS). Because the transport is a connectionless
- * datagram, this is a thin UIpNetDriver: it creates an FMinderaSocket through the Mindera socket
- * subsystem and otherwise relies on UIpNetDriver's address-based dispatch and connectionless
- * handshake. Its only P2P-specific work is (a) a plain-IP passthrough path for PIE / non-P2P URLs and
- * (b) closing UNetConnections when the transport reports a peer dropped (P2P has no OS-level reset).
+ * P2P net driver over an IP2PTransport (Steam / EOS). Modelled on the engine's USteamNetDriver: a thin
+ * UIpNetDriver that only swaps in the Mindera P2P socket subsystem and lets the base class do all the
+ * real work — it creates/binds the FSocket through our subsystem, builds the UNetConnections and runs
+ * the connectionless handshake exactly as it would for UDP.
+ *
+ * Its only P2P-specific behaviour is:
+ *   - choosing the Mindera socket subsystem vs the platform one (GetSocketSubsystem / passthrough),
+ *   - a non-zero client bind "port" so the address resolver's bind sockets succeed (the transport
+ *     itself is connectionless and ignores ports — see FMinderaSocket),
+ *   - closing UNetConnections when the transport reports a peer dropped (P2P has no OS-level reset).
+ *
+ * Passthrough (plain IP) is chosen purely by URL: non-P2P hosts (LAN / PIE / raw IP) fall back to the
+ * platform socket subsystem, so no GIsEditor special-casing is needed.
  *
  * SDK-free header: no platform networking type appears here.
  */
@@ -27,26 +34,17 @@ class GAMINGSERVICES_API UMinderaNetDriver : public UIpNetDriver
 public:
 	UMinderaNetDriver(const FObjectInitializer& ObjectInitializer);
 
-	// ~UNetDriver
+	// ~UNetDriver / UIpNetDriver
 	virtual bool IsAvailable() const override;
 	virtual ISocketSubsystem* GetSocketSubsystem() override;
-	virtual bool InitBase(bool bInitAsClient, FNetworkNotify* InNotify, const FURL& URL, bool bReuseAddressAndPort, FString& Error) override;
 	virtual bool InitConnect(FNetworkNotify* InNotify, const FURL& ConnectURL, FString& Error) override;
 	virtual bool InitListen(FNetworkNotify* InNotify, FURL& ListenURL, bool bReuseAddressAndPort, FString& Error) override;
+	virtual int GetClientPort() override;
 	virtual void TickDispatch(float DeltaTime) override;
-	virtual void Shutdown() override;
-	virtual bool IsNetResourceValid() override;
-	// ~UNetDriver
+	// ~UNetDriver / UIpNetDriver
 
-	/** True when this driver falls back to the plain IP path (PIE / non-P2P URL). */
+	/** True when this driver falls back to the plain IP path (LAN / PIE / non-P2P URL). */
 	bool bIsPassthrough = false;
-
-	/** Virtual port / channel used for P2P listen & connect. */
-	UPROPERTY(Config)
-	int32 P2PVirtualPort = 0;
-
-	/** The datagram socket created by this driver (client or listen). */
-	TSharedPtr<FMinderaSocket> P2PSocket;
 
 private:
 	IP2PTransport* GetTransport() const;
