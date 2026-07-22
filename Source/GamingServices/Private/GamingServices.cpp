@@ -1,11 +1,11 @@
 #include "GamingServices.h"
 #include "Misc/App.h"
 #include "Misc/CoreDelegates.h"
-#include "Services/EOSGamingService.h"
-#include "Services/SteamworksGamingService.h"
-#include "Services/NullGamingService.h"
+#include "Native/GamingServiceFactory.h"
+#include "Native/Null/NullGamingService.h"
 
-#ifdef USE_STEAMWORKS
+#if defined(USE_STEAMWORKS) || defined(USE_EOS)
+#define MINDERA_P2P_NETDRIVER 1
 #include "SocketSubsystemModule.h"
 #include "NetDriver/MinderaSocketSubsystem.h"
 #endif
@@ -19,24 +19,17 @@ void FGamingServicesModule::StartupModule()
 	// (i.e. Standalone Game from the editor), false for PIE / regular editor.
 	const bool bUseRealService = FApp::IsGame();
 
-	if (bUseRealService)
-	{
-#ifdef USE_EOS
-		Service = MakeUnique<FEOSGamingService>();
-#elif defined(USE_STEAMWORKS)
-		Service = MakeUnique<FSteamworksGamingService>();
-#else
-		Service = MakeUnique<FNullGamingService>();
-#endif
-	}
-	else
-	{
-		Service = MakeUnique<FNullGamingService>();
-	}
+	// This module owns the single live platform backend — the decomposed Native/ service selected at
+	// build time (Steam/EOS/Null). UGamingPlatformSubsystem consumes and ticks this same instance, so
+	// exactly ONE backend ever inits the platform SDK. Outside a real game session (PIE / editor) we
+	// force the honest null backend regardless of the configured SDK.
+	Service = bUseRealService
+		? GamingServices::CreateGamingService()
+		: MakeUnique<GamingServices::FNullGamingService>();
 
 	Service->InitializePlatform();
 
-#ifdef USE_STEAMWORKS
+#ifdef MINDERA_P2P_NETDRIVER
 	if (bUseRealService)
 	{
 		FMinderaSocketSubsystem* SocketSubsystem = FMinderaSocketSubsystem::Create();
@@ -48,11 +41,11 @@ void FGamingServicesModule::StartupModule()
 				bSocketSubsystemEnabled = true;
 				FSocketSubsystemModule& SSModule = FModuleManager::LoadModuleChecked<FSocketSubsystemModule>(TEXT("Sockets"));
 				SSModule.RegisterSocketSubsystem(MINDERA_SOCKET_SUBSYSTEM_NAME, SocketSubsystem, false);
-				UE_LOG(LogTemp, Log, TEXT("GamingServices: Registered MinderaSteam socket subsystem"));
+				UE_LOG(LogTemp, Log, TEXT("GamingServices: Registered Mindera P2P socket subsystem"));
 			}
 			else
 			{
-				UE_LOG(LogTemp, Warning, TEXT("GamingServices: Failed to init MinderaSteam socket subsystem: %s"), *Error);
+				UE_LOG(LogTemp, Warning, TEXT("GamingServices: Failed to init Mindera P2P socket subsystem: %s"), *Error);
 				FMinderaSocketSubsystem::Destroy();
 			}
 		}
@@ -69,7 +62,20 @@ void FGamingServicesModule::StartupModule()
 
 void FGamingServicesModule::TearDownPlatform()
 {
-#ifdef USE_STEAMWORKS
+	// Only the platform SDK is torn down on pre-exit (for a clean Steam disconnect). The socket
+	// subsystem is deliberately left registered: net-driver UObjects are destroyed later by GC and
+	// still call GetSocketSubsystem() during their teardown — unregistering here would null that out
+	// and crash. It is unregistered in ShutdownModule instead, after GC has run.
+	if (Service)
+	{
+		Service->DestroyPlatform();
+		Service.Reset();
+	}
+}
+
+void FGamingServicesModule::TearDownSocketSubsystem()
+{
+#ifdef MINDERA_P2P_NETDRIVER
 	if (bSocketSubsystemEnabled)
 	{
 		FModuleManager& ModuleManager = FModuleManager::Get();
@@ -79,16 +85,10 @@ void FGamingServicesModule::TearDownPlatform()
 			SSModule.UnregisterSocketSubsystem(MINDERA_SOCKET_SUBSYSTEM_NAME);
 		}
 		FMinderaSocketSubsystem::Destroy();
-		UE_LOG(LogTemp, Log, TEXT("GamingServices: Unregistered MinderaSteam socket subsystem"));
+		UE_LOG(LogTemp, Log, TEXT("GamingServices: Unregistered Mindera P2P socket subsystem"));
 		bSocketSubsystemEnabled = false;
 	}
 #endif
-
-	if (Service)
-	{
-		Service->DestroyPlatform();
-		Service.Reset();
-	}
 }
 
 void FGamingServicesModule::ShutdownModule()
@@ -99,7 +99,9 @@ void FGamingServicesModule::ShutdownModule()
 		PreExitHandle.Reset();
 	}
 
-	// Safety net: if OnEnginePreExit never fired (e.g. abnormal teardown path),
-	// still tear the platform down here.
+	// Safety net: if OnEnginePreExit never fired (e.g. abnormal teardown path), still tear the platform
+	// down here. Then unregister the socket subsystem — by now the engine has GC'd its net drivers, so
+	// nothing will call GetSocketSubsystem() after this.
 	TearDownPlatform();
+	TearDownSocketSubsystem();
 }

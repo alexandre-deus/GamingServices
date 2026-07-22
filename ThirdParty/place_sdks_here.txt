@@ -1,10 +1,21 @@
-EOS should have the tree:
+EOS (desktop: Windows / Linux / Mac) should have the tree:
 
 EOS-------SDK-------Bin
             |
             --------Include
             |
-            ...
+            --------Lib
+
+
+EOS (Android) is a separate, AAR-based download placed alongside the desktop SDK:
+
+EOS-------SDK-Android-------Include
+              |
+              -------------Bin----Android----static-stdc++----aar    (eossdk-StaticSTDC-release.aar)
+                                                     |
+                                                     ----------libs---arm64-v8a   (libEOSSDK.so)
+                                                                 |
+                                                                 ---x86_64        (libEOSSDK.so)
 
 
 Steamworks should have the tree:

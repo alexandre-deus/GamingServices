@@ -7,11 +7,12 @@
 
 #include "NetDriver/MinderaInternetAddr.h"
 
-class FMinderaSocketSubsystem;
+class IP2PTransport;
 
 /**
- * Socket wrapper around a Steam Networking Sockets connection or listen socket.
- * Uses the newer ISteamNetworkingSockets API with P2P relay support.
+ * Datagram socket over an IP2PTransport. Connectionless like a UDP socket: SendTo/RecvFrom address
+ * peers by id on a virtual-port channel, so UIpNetDriver drives it exactly as it would a UDP socket.
+ * Fully SDK-free — all platform networking lives behind the transport.
  */
 class FMinderaSocket : public FSocket
 {
@@ -25,8 +26,8 @@ public:
 	virtual bool Connect(const FInternetAddr& Addr) override;
 	virtual bool Listen(int32 MaxBacklog) override;
 
-	virtual class FSocket* Accept(const FString& InSocketDescription) override;
-	virtual class FSocket* Accept(FInternetAddr& OutAddr, const FString& InSocketDescription) override;
+	virtual class FSocket* Accept(const FString& InSocketDescription) override { return nullptr; }
+	virtual class FSocket* Accept(FInternetAddr& OutAddr, const FString& InSocketDescription) override { return nullptr; }
 
 	virtual bool SendTo(const uint8* Data, int32 Count, int32& BytesSent, const FInternetAddr& Destination) override;
 	virtual bool Send(const uint8* Data, int32 Count, int32& BytesSent) override;
@@ -40,13 +41,13 @@ public:
 	virtual void GetAddress(FInternetAddr& OutAddr) override;
 	virtual bool GetPeerAddress(FInternetAddr& OutAddr) override;
 
-	virtual bool SetNoDelay(bool bIsNoDelay = true) override;
-	virtual bool SetLinger(bool bShouldLinger = true, int32 Timeout = 0) override;
-	virtual bool SetSendBufferSize(int32 Size, int32& NewSize) override;
-	virtual bool SetReceiveBufferSize(int32 Size, int32& NewSize) override;
-	virtual int32 GetPortNo() override;
+	virtual bool SetNoDelay(bool bIsNoDelay = true) override { return true; }
+	virtual bool SetLinger(bool bShouldLinger = true, int32 Timeout = 0) override { return true; }
+	virtual bool SetSendBufferSize(int32 Size, int32& NewSize) override { NewSize = Size; return true; }
+	virtual bool SetReceiveBufferSize(int32 Size, int32& NewSize) override { NewSize = Size; return true; }
+	virtual int32 GetPortNo() override { return Channel; }
 
-	// -- Unsupported operations --
+	// -- Unsupported operations (connectionless P2P) --
 	virtual bool Shutdown(ESocketShutdownMode Mode) override { return false; }
 	virtual bool Wait(ESocketWaitConditions::Type Condition, FTimespan WaitTime) override { return false; }
 	virtual bool WaitForPendingConnection(bool& bHasPendingConnection, const FTimespan& WaitTime) override { return false; }
@@ -62,31 +63,13 @@ public:
 	virtual bool SetMulticastTtl(uint8 TimeToLive) override { return false; }
 	virtual bool SetMulticastInterface(const FInternetAddr& InterfaceAddress) override { return false; }
 
-	// -- Steam-specific accessors --
-	HSteamNetConnection GetInternalHandle() const { return InternalHandle; }
-	HSteamNetPollGroup GetPollGroup() const { return PollGroup; }
-	bool IsListenSocket() const { return bIsListenSocket; }
-
-	void SetInternalHandle(HSteamNetConnection InHandle) { InternalHandle = InHandle; }
-	void SetPollGroup(HSteamNetPollGroup InPollGroup) { PollGroup = InPollGroup; }
-	void SetIsListenSocket(bool bListen) { bIsListenSocket = bListen; }
-	void SetSendMode(int32 NewSendMode) { SendMode = NewSendMode; }
-
-	/** Receives raw Steam messages. Use for advanced polling scenarios. */
-	bool RecvRaw(SteamNetworkingMessage_t*& OutData, int32 MaxMessages, int32& MessagesRead, ESocketReceiveFlags::Type Flags = ESocketReceiveFlags::None);
+	int32 GetChannel() const { return Channel; }
 
 private:
-	/** Returns the active ISteamNetworkingSockets interface (client or game server). */
-	static ISteamNetworkingSockets* GetSteamSocketsInterface();
+	/** Fetched live (never cached) so a socket destroyed after platform teardown never touches a freed transport. */
+	static IP2PTransport* GetTransport();
 
-	HSteamNetPollGroup PollGroup;
-	HSteamNetConnection InternalHandle;
-	FInternetAddrMindera BindAddress;
-	int32 SendMode;
-	bool bShouldLingerOnClose;
-	bool bIsListenSocket;
-	bool bHasPendingData;
-	SteamNetworkingMessage_t* PendingData;
-
-	FMinderaSocketSubsystem* SocketSubsystem;
+	int32 Channel = 0;
+	FInternetAddrMindera BoundAddr;
+	FInternetAddrMindera PeerAddr;
 };
