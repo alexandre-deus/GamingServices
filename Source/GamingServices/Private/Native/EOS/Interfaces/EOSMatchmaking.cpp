@@ -1,13 +1,33 @@
 #if defined(USE_EOS)
 
 #include "Native/EOS/Interfaces/EOSMatchmaking.h"
-#include "Native/EOS/EOSPlatformCore.h"
+#include "EOSCommon.h"
 #include "EOSCallbackContext.h"
 
 #include <string>
 
 namespace GamingServices
 {
+	/** EOS-backed ISessionJoinHandle payload — owns the lobby EOS_HLobbyDetails and releases it on destruction. */
+	struct FEOSSessionJoinHandle : public ISessionJoinHandle
+	{
+		EOS_HLobbyDetails Handle = nullptr;
+		FString LobbyId;
+		FString SessionName;
+
+		FEOSSessionJoinHandle(EOS_HLobbyDetails InHandle, const FString& InLobbyId, const FString& InSessionName)
+			: Handle(InHandle), LobbyId(InLobbyId), SessionName(InSessionName) {}
+
+		~FEOSSessionJoinHandle()
+		{
+			if (Handle)
+			{
+				EOS_LobbyDetails_Release(Handle);
+				Handle = nullptr;
+			}
+		}
+	};
+
 	using FSessionCreateCallbackCtx = TEOSCallbackContext<FSessionCreateResult, FEOSMatchmaking>;
 	using FSessionJoinCallbackCtx = TEOSCallbackContext<FSessionJoinResult, FEOSMatchmaking>;
 	using FSessionUpdateCallbackCtx = TEOSCallbackContext<FGamingServiceResult, FEOSMatchmaking>;
@@ -22,11 +42,6 @@ namespace GamingServices
 	static EOS_HLobby LobbyHandle(const FEOSPlatformCore& Core)
 	{
 		return static_cast<EOS_HLobby>(Core.GetLobbyHandle());
-	}
-
-	static EOS_ProductUserId ProductUserId(const FEOSPlatformCore& Core)
-	{
-		return static_cast<EOS_ProductUserId>(Core.GetProductUserId());
 	}
 
 	static FString PuidToString(EOS_ProductUserId Puid)
@@ -565,6 +580,91 @@ namespace GamingServices
 
 				LocalCtx->Callback(Result);
 				EOS_LobbySearch_Release(LocalCtx->SearchHandle);
+			});
+	}
+
+	void FEOSMatchmaking::JoinLobbyById(const FString& LobbyId,
+	                                    TFunction<void(const FSessionJoinResult&)> Callback)
+	{
+		checkf(Core.IsInitialized() && Core.IsLoggedIn() && Core.GetLobbyHandle(),
+		       TEXT("EOSGamingService: JoinLobbyById called when service not ready"));
+
+		if (LobbyId.IsEmpty())
+		{
+			UE_LOG(LogTemp, Error, TEXT("EOSGamingService: JoinLobbyById called with empty lobby id"));
+			Callback(FSessionJoinResult(false));
+			return;
+		}
+
+		// Look the lobby up by its exact id (a shared "join code"), then hand the resulting details to the
+		// normal JoinSession so member setup / notifications stay identical to a search- or invite-based join.
+		EOS_Lobby_CreateLobbySearchOptions SearchOptions = {};
+		SearchOptions.ApiVersion = EOS_LOBBY_CREATELOBBYSEARCH_API_LATEST;
+		SearchOptions.MaxResults = 1;
+
+		EOS_HLobbySearch SearchHandle = nullptr;
+		if (EOS_Lobby_CreateLobbySearch(LobbyHandle(Core), &SearchOptions, &SearchHandle) != EOS_EResult::EOS_Success)
+		{
+			UE_LOG(LogTemp, Error, TEXT("EOSGamingService: JoinLobbyById failed to create lobby search"));
+			Callback(FSessionJoinResult(false));
+			return;
+		}
+
+		const std::string LobbyIdUtf8 = TCHAR_TO_UTF8(*LobbyId);
+		EOS_LobbySearch_SetLobbyIdOptions IdOptions = {};
+		IdOptions.ApiVersion = EOS_LOBBYSEARCH_SETLOBBYID_API_LATEST;
+		IdOptions.LobbyId = LobbyIdUtf8.c_str();
+		EOS_LobbySearch_SetLobbyId(SearchHandle, &IdOptions);
+
+		struct FJoinByIdCtx
+		{
+			FEOSMatchmaking* Service;
+			TFunction<void(const FSessionJoinResult&)> Callback;
+			EOS_HLobbySearch SearchHandle;
+			FString LobbyId;
+		};
+		auto* JoinByIdCtx = new FJoinByIdCtx{this, MoveTemp(Callback), SearchHandle, LobbyId};
+
+		EOS_LobbySearch_FindOptions FindOptions = {};
+		FindOptions.ApiVersion = EOS_LOBBYSEARCH_FIND_API_LATEST;
+		FindOptions.LocalUserId = ProductUserId(Core);
+
+		EOS_LobbySearch_Find(
+			SearchHandle,
+			&FindOptions,
+			JoinByIdCtx,
+			[](const EOS_LobbySearch_FindCallbackInfo* Data)
+			{
+				check(Data);
+				check(Data->ClientData);
+				const TUniquePtr<FJoinByIdCtx> LocalCtx(static_cast<FJoinByIdCtx*>(Data->ClientData));
+				FEOSMatchmaking* Self = LocalCtx->Service;
+				check(Self);
+
+				EOS_HLobbyDetails Details = nullptr;
+				if (Data->ResultCode == EOS_EResult::EOS_Success)
+				{
+					EOS_LobbySearch_CopySearchResultByIndexOptions CopyOptions = {};
+					CopyOptions.ApiVersion = EOS_LOBBYSEARCH_COPYSEARCHRESULTBYINDEX_API_LATEST;
+					CopyOptions.LobbyIndex = 0;
+					EOS_LobbySearch_CopySearchResultByIndex(LocalCtx->SearchHandle, &CopyOptions, &Details);
+				}
+				EOS_LobbySearch_Release(LocalCtx->SearchHandle);
+
+				if (!Details)
+				{
+					UE_LOG(LogTemp, Error,
+					       TEXT("EOSGamingService: JoinLobbyById found no lobby for id '%s' (result %d)"),
+					       *LocalCtx->LobbyId, (int32)Data->ResultCode);
+					LocalCtx->Callback(FSessionJoinResult(false));
+					return;
+				}
+
+				// The join handle owns Details from here; session name resolves from the advertised attribute.
+				const FString SessionName = GetLobbyAttribute(Details, GSessionNameAttributeKey);
+				FSessionJoinHandle JoinHandle;
+				JoinHandle.BackendHandle = MakeShared<FEOSSessionJoinHandle>(Details, LocalCtx->LobbyId, SessionName);
+				Self->JoinSession(JoinHandle, LocalCtx->Callback);
 			});
 	}
 

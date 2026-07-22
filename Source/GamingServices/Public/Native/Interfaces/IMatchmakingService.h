@@ -31,6 +31,15 @@ public:
 	virtual void GetCurrentSession(TFunction<void(const FSessionInfo&)> Callback) = 0;
 	virtual void ShowInviteFriendsDialog(TFunction<void(const FGamingServiceResult&)> Callback) = 0;
 
+	// Join a lobby directly by its backend id string — no search bucket, no presence, no EAS friends.
+	// Lets a host share a "join code" (the lobby id) out of band and a peer join with just that string.
+	virtual void JoinLobbyById(const FString& LobbyId,
+	                           TFunction<void(const FSessionJoinResult&)> Callback) = 0;
+
+	// Backend id of the lobby the local user is currently in (empty when not in one) — the string a host
+	// shares as a join code for JoinLobbyById.
+	virtual FString GetCurrentLobbyId() const = 0;
+
 	virtual FString GetSessionConnectionString() const = 0;
 
 	// Notification sinks (set by owner, fired by backend).

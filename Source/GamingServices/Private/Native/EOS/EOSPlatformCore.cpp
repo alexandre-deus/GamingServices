@@ -1,7 +1,12 @@
 #if defined(USE_EOS)
 
 #include "Native/EOS/EOSPlatformCore.h"
+#include "EOSCommon.h"
 #include "EOSCallbackContext.h"
+
+#if PLATFORM_ANDROID
+#include "Android/eos_Android.h"
+#endif
 
 #include "HAL/PlatformFileManager.h"
 #include "Misc/Paths.h"
@@ -125,7 +130,10 @@ namespace GamingServices
 			{ TEXT("DeploymentId"),   Overrides.DeploymentId,   Opts.DeploymentId },
 			{ TEXT("ClientId"),       Overrides.ClientId,       Opts.ClientId },
 			{ TEXT("ClientSecret"),   Overrides.ClientSecret,   Opts.ClientSecret },
-			{ TEXT("EncryptionKey"),  Overrides.EncryptionKey,  Opts.EncryptionKey },
+			// Ini key is "EOSEncryptionKey", NOT "EncryptionKey": the bare name is on UE's staging
+			// IniKeyDenylist (Engine BaseGame.ini), so it is stripped from cooked/packaged config and a
+			// packaged build would read it empty and fail to init. A prefixed name survives staging.
+			{ TEXT("EOSEncryptionKey"), Overrides.EncryptionKey, Opts.EncryptionKey },
 		};
 
 		TArray<FString> MissingKeys;
@@ -274,6 +282,9 @@ namespace GamingServices
 
 		EOS_Auth_LoginOptions LoginOptions = {};
 		LoginOptions.ApiVersion = EOS_AUTH_LOGIN_API_LATEST;
+		// BasicProfile only. Presence/Friends require a published EAS consent screen (which needs a
+		// privacy-policy domain we don't have yet); requesting them when unauthorized loops the login.
+		// Lobby invites go through JoinLobbyById ("join code") instead, which needs no EAS scopes.
 		LoginOptions.ScopeFlags = EOS_EAuthScopeFlags::EOS_AS_BasicProfile;
 
 		EOS_Auth_Credentials Credentials = {};
@@ -634,6 +645,19 @@ namespace GamingServices
 		InitOptions.ProductName = ProductNameUtf8.c_str();
 		InitOptions.ProductVersion = ProductVersionUtf8.c_str();
 
+#if PLATFORM_ANDROID
+		// Android requires system-specific init options passed to EOS_Initialize. The JNI bridge is set
+		// up on the Java side by EOSSDK.init(this) (wired through EOS_Android_UPL.xml); the SDK reads the
+		// registered JavaVM from there, so Reserved stays null and only the (optional) directories differ.
+		// Must outlive the EOS_Initialize call below.
+		EOS_Android_InitializeOptions AndroidInitOptions = {};
+		AndroidInitOptions.ApiVersion = EOS_ANDROID_INITIALIZEOPTIONS_API_LATEST;
+		AndroidInitOptions.Reserved = nullptr;
+		AndroidInitOptions.OptionalInternalDirectory = nullptr;
+		AndroidInitOptions.OptionalExternalDirectory = nullptr;
+		InitOptions.SystemInitializeOptions = &AndroidInitOptions;
+#endif
+
 		EOS_EResult InitResult = EOS_Initialize(&InitOptions);
 		if (InitResult != EOS_EResult::EOS_Success && InitResult != EOS_EResult::EOS_AlreadyConfigured)
 		{
@@ -645,9 +669,16 @@ namespace GamingServices
 		EOS_Logging_SetLogLevel(EOS_ELogCategory::EOS_LC_ALL_CATEGORIES, EOS_ELogLevel::EOS_LOG_Verbose);
 
 		EOS_Platform_Options PlatformOptions = {};
-		// For some reason Epic games made the latest version be 14 in this macro but the binaries say it only goes up to 13...
-		//PlatformOptions.ApiVersion = EOS_PLATFORM_OPTIONS_API_LATEST;
+#if PLATFORM_ANDROID
+		// Android links a newer EOS SDK (1.19, platform-options version 15) than desktop. Its binary
+		// rejects the desktop's hardcoded v13, making EOS_Platform_Create return null — so use the value
+		// the linked SDK header advertises (the struct layout is identical across v13..v15).
+		PlatformOptions.ApiVersion = EOS_PLATFORM_OPTIONS_API_LATEST;
+#else
+		// Desktop SDK (1.17): the header's EOS_PLATFORM_OPTIONS_API_LATEST is 14, but that binary only
+		// accepts 13, so it stays hardcoded here.
 		PlatformOptions.ApiVersion = 13;
+#endif
 		std::string ProductIdUtf8 = TCHAR_TO_UTF8(*EOSOpts.ProductId);
 		std::string SandboxIdUtf8 = TCHAR_TO_UTF8(*EOSOpts.SandboxId);
 		std::string DeploymentIdUtf8 = TCHAR_TO_UTF8(*EOSOpts.DeploymentId);
@@ -698,9 +729,18 @@ namespace GamingServices
 		PlatformOptions.EncryptionKey = EncryptionKeyUtf8.c_str();
 		UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Using encryption key for PlayerDataStorage"));
 
-		FString CacheDir = FPaths::ProjectSavedDir() / TEXT("EOSCache");
-		FPaths::MakeStandardFilename(CacheDir);
-		FPaths::ConvertRelativePathToFull(CacheDir);
+		// EOS requires an ABSOLUTE cache directory. ProjectSavedDir() is relative in packaged builds
+		// (e.g. "../../../TurtleRock/Saved/"), and ConvertRelativePathToFull RETURNS the absolute path
+		// rather than mutating its argument — the previous code discarded that return value, so the path
+		// stayed relative and EOS_Platform_Create rejected it in cooked builds.
+#if PLATFORM_ANDROID
+		// On Android FPlatformProcess::BaseDir() is empty, so ConvertRelativePathToFull can't absolutize
+		// ProjectSavedDir and EOS gets a relative path it rejects. GamePersistentDownloadDir() is the app's
+		// absolute, writable external files dir — the correct place for the EOS cache on Android.
+		FString CacheDir = FPaths::Combine(FPlatformMisc::GamePersistentDownloadDir(), TEXT("EOSCache"));
+#else
+		FString CacheDir = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("EOSCache"));
+#endif
 		IFileManager::Get().MakeDirectory(*CacheDir, true);
 		// Must outlive the EOS_Platform_Create call below; assigning TCHAR_TO_UTF8() directly leaves
 		// a dangling pointer.

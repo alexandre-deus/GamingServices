@@ -1,7 +1,7 @@
 #if defined(USE_EOS)
 
 #include "Native/EOS/Interfaces/EOSCloudStorage.h"
-#include "Native/EOS/EOSPlatformCore.h"
+#include "EOSCommon.h"
 #include "EOSCallbackContext.h"
 
 #include "HAL/PlatformFileManager.h"
@@ -21,11 +21,6 @@ namespace GamingServices
 	static EOS_HPlayerDataStorage PlayerDataStorageHandle(const FEOSPlatformCore& Core)
 	{
 		return static_cast<EOS_HPlayerDataStorage>(Core.GetPlayerDataStorageHandle());
-	}
-
-	static EOS_ProductUserId ProductUserId(const FEOSPlatformCore& Core)
-	{
-		return static_cast<EOS_ProductUserId>(Core.GetProductUserId());
 	}
 
 	FEOSCloudStorage::FEOSCloudStorage(FEOSPlatformCore& InCore)

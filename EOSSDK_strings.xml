@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Resolves the @string/eos_login_protocol_scheme referenced by the EOS AAR's bundled
+     EOSAuthHandlerActivity manifest. Kept empty here (matching the engine's EOSSDK integration); the
+     functional eos.<clientid> deep-link scheme is merged onto that same activity by EOS_Android_UPL.xml. -->
+<resources>
+    <string name="eos_login_protocol_scheme"></string>
+</resources>

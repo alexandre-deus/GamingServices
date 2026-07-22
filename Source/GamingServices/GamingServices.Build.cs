@@ -48,11 +48,28 @@ public class GamingServices : ModuleRules
         return hasInclude && hasLib && hasBin;
     }
 
+    // EOS binaries are only vendored for desktop platforms (see AddEOS). On any other platform
+    // (e.g. Android) selecting EOS would compile the EOS interface code but leave every EOS_* symbol
+    // unlinked, so the backend must fall back to Null there.
+    public bool IsEOSSupportedOnPlatform(ReadOnlyTargetRules Target)
+    {
+        return Target.Platform == UnrealTargetPlatform.Win64
+            || Target.Platform == UnrealTargetPlatform.Linux
+            || Target.Platform == UnrealTargetPlatform.LinuxArm64
+            || Target.Platform == UnrealTargetPlatform.Mac
+            || Target.Platform == UnrealTargetPlatform.Android;
+    }
+
     public void AddEOS(ReadOnlyTargetRules Target)
     {
         Console.WriteLine($"[GamingServices] AddEOS for platform: {Target.Platform}");
 
-        string EOSRoot    = Path.Combine(PluginRoot, "ThirdParty", "EOS", "SDK");
+        bool bAndroid = Target.Platform == UnrealTargetPlatform.Android;
+
+        // Android ships as a separate, self-contained SDK (AAR + per-ABI .so, a newer EOS version)
+        // vendored alongside the desktop SDK. Desktop uses ThirdParty/EOS/SDK; Android uses
+        // ThirdParty/EOS/SDK-Android, each with its own headers.
+        string EOSRoot    = Path.Combine(PluginRoot, "ThirdParty", "EOS", bAndroid ? "SDK-Android" : "SDK");
         string EOSInclude = Path.Combine(EOSRoot, "Include");
         string EOSLibDir  = Path.Combine(EOSRoot, "Lib");
         string EOSBinDir  = Path.Combine(EOSRoot, "Bin");
@@ -100,6 +117,24 @@ public class GamingServices : ModuleRules
             Console.WriteLine($"[GamingServices]   Dylib exists: {File.Exists(dylib)} -> {dylib}");
             RuntimeDependencies.Add("$(TargetOutputDir)/libEOSSDK-Mac-Shipping.dylib", dylib);
             ForceCopy(dylib, outDir, "libEOSSDK-Mac-Shipping.dylib");
+        }
+        else if (Target.Platform == UnrealTargetPlatform.Android)
+        {
+            // One libEOSSDK.so per ABI (arm64-v8a, x86_64 — the vendored AAR has no armeabi-v7a).
+            // These are linked only for symbol resolution; the runtime .so plus the Java/JNI bridge
+            // (com.epicgames.mobile.eossdk.EOSSDK) are packaged into the APK from the AAR by
+            // EOS_Android_UPL.xml, which also calls EOSSDK.init() and registers the auth-handler activity.
+            string StaticStdc = Path.Combine(EOSBinDir, "Android", "static-stdc++");
+            foreach (string abi in new[] { "arm64-v8a", "x86_64" })
+            {
+                string so = Path.Combine(StaticStdc, "libs", abi, "libEOSSDK.so");
+                Console.WriteLine($"[GamingServices]   SO exists ({abi}): {File.Exists(so)} -> {so}");
+                PublicAdditionalLibraries.Add(so);
+            }
+
+            string uplPath = Path.Combine(PluginRoot, "EOS_Android_UPL.xml");
+            Console.WriteLine($"[GamingServices]   UPL exists: {File.Exists(uplPath)} -> {uplPath}");
+            AdditionalPropertiesForReceipt.Add("AndroidPlugin", uplPath);
         }
         else
         {
@@ -220,7 +255,7 @@ public class GamingServices : ModuleRules
         // Default backend for shipping builds. The GAMINGSERVICES_BACKEND environment variable
         // overrides it at build time (used by the isolated test harness to select EOS without
         // touching source): Steamworks | EpicOnlineServices | Null.
-        EServiceBackends backend = EServiceBackends.Steamworks;
+        EServiceBackends backend = EServiceBackends.EpicOnlineServices;
         string backendEnv = Environment.GetEnvironmentVariable("GAMINGSERVICES_BACKEND");
         if (!string.IsNullOrEmpty(backendEnv) && Enum.TryParse(backendEnv, true, out EServiceBackends parsedBackend))
         {
@@ -235,7 +270,11 @@ public class GamingServices : ModuleRules
         switch (backend)
         {
             case EServiceBackends.EpicOnlineServices:
-                if (IsEOSAvailable())
+                if (!IsEOSSupportedOnPlatform(Target))
+                {
+                    Console.WriteLine($"[GamingServices] EOS not supported on {Target.Platform}, falling back to null service.");
+                }
+                else if (IsEOSAvailable())
                 {
                     Console.WriteLine($"[GamingServices] EOS SDK found, configuring...");
                     PublicDefinitions.Add("USE_EOS=1");

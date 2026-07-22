@@ -1,7 +1,7 @@
 #if defined(USE_EOS)
 
 #include "Native/EOS/Interfaces/EOSEntitlements.h"
-#include "Native/EOS/EOSPlatformCore.h"
+#include "EOSCommon.h"
 #include "EOSCallbackContext.h"
 
 #include <string>

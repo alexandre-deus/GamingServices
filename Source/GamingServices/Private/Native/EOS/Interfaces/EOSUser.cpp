@@ -1,8 +1,7 @@
 #if defined(USE_EOS)
 
 #include "Native/EOS/Interfaces/EOSUser.h"
-#include "Native/EOS/EOSPlatformCore.h"
-#include "EOSCallbackContext.h"
+#include "EOSCommon.h"
 
 namespace GamingServices
 {

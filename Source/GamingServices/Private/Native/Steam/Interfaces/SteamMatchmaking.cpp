@@ -400,6 +400,15 @@ namespace GamingServices
 		return FString::Printf(TEXT("steam.%llu"), OwnerID.ConvertToUint64());
 	}
 
+	FString FSteamMatchmaking::GetCurrentLobbyId() const
+	{
+		if (!Impl->bIsInLobby || !Impl->CurrentLobbyId.IsValid())
+		{
+			return FString();
+		}
+		return FString::Printf(TEXT("%llu"), Impl->CurrentLobbyId.ConvertToUint64());
+	}
+
 	void FSteamMatchmaking::CreateSession(const FSessionSettings& Settings, TFunction<void(const FSessionCreateResult&)> Callback)
 	{
 		ISteamMatchmaking* SteamMatchmaking = ::SteamMatchmaking();
@@ -544,6 +553,22 @@ namespace GamingServices
 
 			UE_LOG(LogTemp, Log, TEXT("SteamworksGamingService: Waiting for %d lobby metadata updates..."), SearchContext->PendingLobbyIDs.Num());
 		});
+	}
+
+	void FSteamMatchmaking::JoinLobbyById(const FString& LobbyId, TFunction<void(const FSessionJoinResult&)> Callback)
+	{
+		const CSteamID LobbySteamId(FCString::Strtoui64(*LobbyId, nullptr, 10));
+		if (!LobbySteamId.IsValid())
+		{
+			UE_LOG(LogTemp, Error, TEXT("SteamworksGamingService: JoinLobbyById given invalid lobby id '%s'"), *LobbyId);
+			Callback(FSessionJoinResult(false));
+			return;
+		}
+
+		// A Steam lobby id is a shareable "join code"; reuse the normal join path with a handle built from it.
+		FSessionJoinHandle JoinHandle;
+		JoinHandle.BackendHandle = MakeShared<FSteamworksSessionJoinHandle>(LobbySteamId);
+		JoinSession(JoinHandle, MoveTemp(Callback));
 	}
 
 	void FSteamMatchmaking::JoinSession(const FSessionJoinHandle& JoinHandle, TFunction<void(const FSessionJoinResult&)> Callback)

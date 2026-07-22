@@ -21,7 +21,7 @@
  * FMinderaSocketSubsystem / UMinderaNetDriver / UMinderaNetConnection) talk ONLY to this interface —
  * no platform SDK type ever appears in a netdriver header. Each backend implements it in a single
  * .cpp that includes just its own SDK:
- *   - SteamP2PTransport.cpp -> steam/*.h : ISteamNetworkingSockets is connection-oriented, so this
+ *   - SteamP2PTransport.cpp -> steam headers : ISteamNetworkingSockets is connection-oriented, so this
  *       impl keeps the peer<->connection map + auto-connect/auto-accept INTERNALLY (the bridge that
  *       used to live in the driver). That preserves the proven relay behaviour.
  *   - EOSP2PTransport.cpp   -> eos_p2p.h : natively connectionless — SendTo == EOS_P2P_SendPacket,

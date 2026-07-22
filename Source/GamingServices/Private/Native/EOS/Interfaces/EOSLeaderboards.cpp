@@ -2,7 +2,7 @@
 
 #include "Native/EOS/Interfaces/EOSLeaderboards.h"
 #include "Native/EOS/Interfaces/EOSStats.h"
-#include "Native/EOS/EOSPlatformCore.h"
+#include "EOSCommon.h"
 #include "EOSCallbackContext.h"
 
 #include <string>
@@ -11,15 +11,32 @@ namespace GamingServices
 {
 	using FLeaderboardCallbackCtx = TEOSCallbackContext<FLeaderboardResult, FEOSLeaderboards>;
 
-	// Cast the core's opaque accessors back to their EOS_* types in this .cpp so the core header stays SDK-free.
-	static EOS_HLeaderboards LeaderboardsHandle(const FEOSPlatformCore& Core)
+	namespace
 	{
-		return static_cast<EOS_HLeaderboards>(Core.GetLeaderboardsHandle());
-	}
+		// Cast the core's opaque accessor back to its EOS_* type here so the core header stays SDK-free.
+		EOS_HLeaderboards LeaderboardsHandle(const FEOSPlatformCore& Core)
+		{
+			return static_cast<EOS_HLeaderboards>(Core.GetLeaderboardsHandle());
+		}
 
-	static EOS_ProductUserId ProductUserId(const FEOSPlatformCore& Core)
-	{
-		return static_cast<EOS_ProductUserId>(Core.GetProductUserId());
+		// Map an EOS leaderboard record onto the game's leaderboard entry.
+		void ConvertEOSLeaderboardRecordToEntry(const EOS_Leaderboards_LeaderboardRecord* EOSRecord,
+		                                        FLeaderboardEntry& Entry)
+		{
+			if (EOSRecord)
+			{
+				// Record->UserId is an EOS_ProductUserId handle, not a string; stringify it properly.
+				char PuidStr[EOS_PRODUCTUSERID_MAX_LENGTH + 1];
+				int32_t PuidLen = sizeof(PuidStr);
+				if (EOS_ProductUserId_ToString(EOSRecord->UserId, PuidStr, &PuidLen) == EOS_EResult::EOS_Success)
+				{
+					Entry.UserId = UTF8_TO_TCHAR(PuidStr);
+				}
+				Entry.DisplayName = UTF8_TO_TCHAR(EOSRecord->UserDisplayName);
+				Entry.Score = EOSRecord->Score;
+				Entry.Rank = EOSRecord->Rank;
+			}
+		}
 	}
 
 	void FEOSLeaderboards::WriteLeaderboardScore(const FString& LeaderboardId, int32 Score,

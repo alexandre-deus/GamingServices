@@ -40,6 +40,10 @@ namespace GamingServices
 		virtual void GetCurrentSession(TFunction<void(const FSessionInfo&)> Callback) override;
 		virtual void ShowInviteFriendsDialog(TFunction<void(const FGamingServiceResult&)> Callback) override;
 
+		virtual void JoinLobbyById(const FString& LobbyId,
+		                           TFunction<void(const FSessionJoinResult&)> Callback) override;
+		virtual FString GetCurrentLobbyId() const override;
+
 		virtual FString GetSessionConnectionString() const override;
 
 		/** Drives pending lobby-search contexts; called each frame by the owning service. */

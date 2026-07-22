@@ -1,7 +1,7 @@
 #if defined(USE_EOS)
 
 #include "Native/EOS/Interfaces/EOSAchievements.h"
-#include "Native/EOS/EOSPlatformCore.h"
+#include "EOSCommon.h"
 #include "EOSCallbackContext.h"
 
 #include <string>
@@ -11,15 +11,35 @@ namespace GamingServices
 	using FAchievementUnlockCallbackCtx = TEOSCallbackContext<FGamingServiceResult, FEOSAchievements>;
 	using FAchievementsQueryCallbackCtx = TEOSCallbackContext<FAchievementsQueryResult, FEOSAchievements>;
 
-	// Cast the core's opaque accessors back to their EOS_* types in this .cpp so the core header stays SDK-free.
-	static EOS_HAchievements AchievementsHandle(const FEOSPlatformCore& Core)
+	namespace
 	{
-		return static_cast<EOS_HAchievements>(Core.GetAchievementsHandle());
-	}
+		// Cast the core's opaque accessor back to its EOS_* type here so the core header stays SDK-free.
+		EOS_HAchievements AchievementsHandle(const FEOSPlatformCore& Core)
+		{
+			return static_cast<EOS_HAchievements>(Core.GetAchievementsHandle());
+		}
 
-	static EOS_ProductUserId ProductUserId(const FEOSPlatformCore& Core)
-	{
-		return static_cast<EOS_ProductUserId>(Core.GetProductUserId());
+		// Map an EOS achievement definition + player-progress record onto the game's achievement struct.
+		void ConvertEOSAchievementToGameAchievement(const EOS_Achievements_DefinitionV2* EOSDefinition,
+		                                            const EOS_Achievements_PlayerAchievement* EOSPlayerAchievement,
+		                                            FGameAchievement& GameAchievement)
+		{
+			if (EOSDefinition)
+			{
+				GameAchievement.Id = UTF8_TO_TCHAR(EOSDefinition->AchievementId);
+				GameAchievement.DisplayName = UTF8_TO_TCHAR(EOSDefinition->UnlockedDisplayName);
+				GameAchievement.Description = UTF8_TO_TCHAR(EOSDefinition->UnlockedDescription);
+			}
+
+			if (EOSPlayerAchievement)
+			{
+				// Locked achievements report EOS_ACHIEVEMENTS_ACHIEVEMENT_UNLOCKTIME_UNDEFINED (-1), so a
+				// plain "!= 0" check would read locked as unlocked.
+				GameAchievement.bIsUnlocked =
+					(EOSPlayerAchievement->UnlockTime != EOS_ACHIEVEMENTS_ACHIEVEMENT_UNLOCKTIME_UNDEFINED);
+				GameAchievement.Progress = EOSPlayerAchievement->Progress;
+			}
+		}
 	}
 
 	void FEOSAchievements::UnlockAchievement(const FString& AchievementId,

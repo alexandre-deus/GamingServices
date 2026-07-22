@@ -1,7 +1,7 @@
 #if defined(USE_EOS)
 
 #include "Native/EOS/Interfaces/EOSStats.h"
-#include "Native/EOS/EOSPlatformCore.h"
+#include "EOSCommon.h"
 #include "EOSCallbackContext.h"
 
 #include <string>
@@ -15,11 +15,6 @@ namespace GamingServices
 	static EOS_HStats StatsHandle(const FEOSPlatformCore& Core)
 	{
 		return static_cast<EOS_HStats>(Core.GetStatsHandle());
-	}
-
-	static EOS_ProductUserId ProductUserId(const FEOSPlatformCore& Core)
-	{
-		return static_cast<EOS_ProductUserId>(Core.GetProductUserId());
 	}
 
 	void FEOSStats::IngestStat(const FString& StatName, int32 Amount,

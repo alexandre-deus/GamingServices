@@ -40,10 +40,19 @@ Download the SDKs and place them inside the plugin `ThirdParty` directory with t
 GamingServices/
   ThirdParty/
     EOS/
-      SDK/
+      SDK/                  # desktop EOS SDK (Windows/Linux/Mac)
         Include/
         Lib/
         Bin/
+      SDK-Android/          # Android EOS SDK (separate download; AAR-based)
+        Include/
+        Bin/
+          Android/
+            static-stdc++/
+              aar/          # eossdk-StaticSTDC-release.aar
+              libs/
+                arm64-v8a/  # libEOSSDK.so
+                x86_64/     # libEOSSDK.so
     Steamworks/
       sdk/
         public/
@@ -53,7 +62,7 @@ GamingServices/
 
 ### 2.1) Epic Online Services (EOS)
 - Download: `https://dev.epicgames.com/docs` (navigate to Epic Online Services SDK)
-- Place contents so the include/lib/bin paths match:
+- Place the **desktop** SDK so the include/lib/bin paths match:
   - `ThirdParty/EOS/SDK/Include`
   - `ThirdParty/EOS/SDK/Lib`
   - `ThirdParty/EOS/SDK/Bin`
@@ -63,6 +72,17 @@ The build script expects platform binaries at:
 - Linux: `libEOSSDK-Linux-Shipping.so`
 - LinuxArm64: `libEOSSDK-LinuxArm64-Shipping.so`
 - Mac: `libEOSSDK-Mac-Shipping.dylib`
+
+For **Android**, download the separate "EOS SDK for Android" package and place it under `SDK-Android/`
+(it is a different, usually newer, release than the desktop SDK and is packaged as an AAR):
+- `ThirdParty/EOS/SDK-Android/Include`
+- `ThirdParty/EOS/SDK-Android/Bin/Android/static-stdc++/aar/eossdk-StaticSTDC-release.aar`
+
+The build script links one `libEOSSDK.so` per ABI, extracted from the AAR's `jni/<abi>/` into:
+- `ThirdParty/EOS/SDK-Android/Bin/Android/static-stdc++/libs/arm64-v8a/libEOSSDK.so`
+- `ThirdParty/EOS/SDK-Android/Bin/Android/static-stdc++/libs/x86_64/libEOSSDK.so`
+
+The AAR itself (runtime `.so` + JNI classes) is packaged into the APK by `EOS_Android_UPL.xml`.
 
 ### 2.2) Steamworks
 - Join the Steamworks partner program to access the SDK.

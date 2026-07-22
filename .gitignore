@@ -2,3 +2,12 @@ Intermediate
 Binaries
 ThirdParty/*
 !ThirdParty/place_sdks_here.txt
+
+# Keep the third-party SDK folders present on a fresh checkout (their contents stay ignored — the
+# SDKs are provisioned out-of-band; see place_sdks_here.txt).
+!ThirdParty/EOS/
+ThirdParty/EOS/*
+!ThirdParty/EOS/.gitkeep
+!ThirdParty/Steamworks/
+ThirdParty/Steamworks/*
+!ThirdParty/Steamworks/.gitkeep
