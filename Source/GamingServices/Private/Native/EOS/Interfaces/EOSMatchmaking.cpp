@@ -1,4 +1,4 @@
-#if defined(USE_EOS)
+#if defined(GS_WITH_EOS)
 
 #include "Native/EOS/Interfaces/EOSMatchmaking.h"
 #include "EOSCommon.h"
@@ -17,6 +17,9 @@ namespace GamingServices
 
 		FEOSSessionJoinHandle(EOS_HLobbyDetails InHandle, const FString& InLobbyId, const FString& InSessionName)
 			: Handle(InHandle), LobbyId(InLobbyId), SessionName(InSessionName) {}
+
+		virtual bool HasBackendDetails() const override { return Handle != nullptr; }
+		virtual FString GetLobbyId() const override { return LobbyId; }
 
 		~FEOSSessionJoinHandle()
 		{
@@ -42,17 +45,6 @@ namespace GamingServices
 	static EOS_HLobby LobbyHandle(const FEOSPlatformCore& Core)
 	{
 		return static_cast<EOS_HLobby>(Core.GetLobbyHandle());
-	}
-
-	static FString PuidToString(EOS_ProductUserId Puid)
-	{
-		char Buffer[EOS_PRODUCTUSERID_MAX_LENGTH + 1];
-		int32_t BufferLength = sizeof(Buffer);
-		if (Puid && EOS_ProductUserId_ToString(Puid, Buffer, &BufferLength) == EOS_EResult::EOS_Success)
-		{
-			return UTF8_TO_TCHAR(Buffer);
-		}
-		return FString();
 	}
 
 	static EOS_ELobbyPermissionLevel ToLobbyPermission(ESessionPrivacy Privacy)
@@ -117,6 +109,58 @@ namespace GamingServices
 			EOS_Lobby_Attribute_Release(Attribute);
 		}
 		return Value;
+	}
+
+	/**
+	 * Turn an invite id into everything the game needs to show and act on it. Shared by the arrival
+	 * notification and the pending-invite poll, which differ only in where the id came from.
+	 *
+	 * Returns false when the invite no longer resolves to a lobby — the host closed it, or it was already
+	 * consumed elsewhere — in which case the invite is not worth offering, because accepting could not
+	 * work. On success OutInfo's join handle owns the details handle and releases it when dropped.
+	 */
+	static bool BuildInviteInfo(const FEOSPlatformCore& Core, const char* InviteId, EOS_ProductUserId Sender,
+	                            FLobbyInviteReceivedInfo& OutInfo)
+	{
+		if (!InviteId)
+		{
+			return false;
+		}
+
+		OutInfo.InviteId = UTF8_TO_TCHAR(InviteId);
+
+		EOS_Lobby_CopyLobbyDetailsHandleByInviteIdOptions CopyOptions = {};
+		CopyOptions.ApiVersion = EOS_LOBBY_COPYLOBBYDETAILSHANDLEBYINVITEID_API_LATEST;
+		CopyOptions.InviteId = InviteId;
+
+		EOS_HLobbyDetails Details = nullptr;
+		if (EOS_Lobby_CopyLobbyDetailsHandleByInviteId(LobbyHandle(Core), &CopyOptions, &Details) !=
+			EOS_EResult::EOS_Success || !Details)
+		{
+			UE_LOG(LogTemp, Warning,
+			       TEXT("EOSGamingService: invite %hs no longer resolves to a lobby - ignoring"), InviteId);
+			return false;
+		}
+
+		// The arrival notification names the sender; the pending-invite cache does not. Fall back to the
+		// lobby owner, who is the person being joined either way, so a polled invite is not nameless.
+		EOS_ProductUserId Inviter = Sender;
+		if (!Inviter)
+		{
+			EOS_LobbyDetails_GetLobbyOwnerOptions OwnerOptions = {};
+			OwnerOptions.ApiVersion = EOS_LOBBYDETAILS_GETLOBBYOWNER_API_LATEST;
+			Inviter = EOS_LobbyDetails_GetLobbyOwner(Details, &OwnerOptions);
+		}
+
+		// Neither invite path carries a LobbyId, so leave it empty: the handle owns live details, which is
+		// what JoinSession uses; the id would only appear in logging.
+		const FString SessionName = GetLobbyAttribute(Details, GSessionNameAttributeKey);
+		OutInfo.InviterUserId = PuidToString(Inviter);
+		OutInfo.InviterDisplayName = Inviter
+			                             ? GetMemberAttribute(Details, Inviter, GDisplayNameAttributeKey)
+			                             : FString();
+		OutInfo.JoinHandle.BackendHandle = MakeShared<FEOSSessionJoinHandle>(Details, FString(), SessionName);
+		return true;
 	}
 
 	/** Copy the details handle of the lobby this user is currently in; nullptr when unavailable. */
@@ -204,6 +248,54 @@ namespace GamingServices
 						Self->OnLobbyInviteAccepted(Info);
 					}
 				});
+		}
+
+		if (LobbyInviteReceivedNotificationId == EOS_INVALID_NOTIFICATIONID)
+		{
+			EOS_Lobby_AddNotifyLobbyInviteReceivedOptions ReceivedOptions = {};
+			ReceivedOptions.ApiVersion = EOS_LOBBY_ADDNOTIFYLOBBYINVITERECEIVED_API_LATEST;
+
+			LobbyInviteReceivedNotificationId = EOS_Lobby_AddNotifyLobbyInviteReceived(
+				LobbyHandle(Core),
+				&ReceivedOptions,
+				this,
+				[](const EOS_Lobby_LobbyInviteReceivedCallbackInfo* Data)
+				{
+					check(Data);
+					check(Data->ClientData);
+					auto* Self = static_cast<FEOSMatchmaking*>(Data->ClientData);
+
+					UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Lobby invite received, InviteId=%hs"),
+					       Data->InviteId ? Data->InviteId : "null");
+
+					FLobbyInviteReceivedInfo Info;
+					if (!BuildInviteInfo(Self->Core, Data->InviteId, Data->TargetUserId, Info))
+					{
+						// Without details there is nothing to join, so surfacing a toast would offer an accept
+						// that cannot work. Drop it rather than show a dead prompt.
+						return;
+					}
+
+					if (Self->OnLobbyInviteReceived)
+					{
+						Self->OnLobbyInviteReceived(Info);
+					}
+				});
+
+			// Worth stating either way: an invite that never arrives is otherwise indistinguishable from
+			// one that was never sent, and this is the line that tells the two apart.
+			if (LobbyInviteReceivedNotificationId == EOS_INVALID_NOTIFICATIONID)
+			{
+				UE_LOG(LogTemp, Warning,
+				       TEXT("EOSGamingService: FAILED to register the lobby invite-received notification - "
+				            "incoming invites will not be seen"));
+			}
+			else
+			{
+				UE_LOG(LogTemp, Log,
+				       TEXT("EOSGamingService: listening for incoming lobby invites (notification %llu)"),
+				       LobbyInviteReceivedNotificationId);
+			}
 		}
 
 		if (LobbyMemberStatusNotificationId == EOS_INVALID_NOTIFICATIONID)
@@ -304,6 +396,11 @@ namespace GamingServices
 			EOS_Lobby_RemoveNotifyLobbyInviteAccepted(LobbyHandle(Core), LobbyInviteAcceptedNotificationId);
 			LobbyInviteAcceptedNotificationId = EOS_INVALID_NOTIFICATIONID;
 		}
+		if (LobbyInviteReceivedNotificationId != EOS_INVALID_NOTIFICATIONID)
+		{
+			EOS_Lobby_RemoveNotifyLobbyInviteReceived(LobbyHandle(Core), LobbyInviteReceivedNotificationId);
+			LobbyInviteReceivedNotificationId = EOS_INVALID_NOTIFICATIONID;
+		}
 		if (LobbyMemberStatusNotificationId != EOS_INVALID_NOTIFICATIONID)
 		{
 			EOS_Lobby_RemoveNotifyLobbyMemberStatusReceived(LobbyHandle(Core), LobbyMemberStatusNotificationId);
@@ -341,6 +438,11 @@ namespace GamingServices
 		CreateOptions.PermissionLevel = ToLobbyPermission(Settings.Privacy);
 		CreateOptions.bPresenceEnabled = Settings.bUsesPresence ? EOS_TRUE : EOS_FALSE;
 		CreateOptions.bAllowInvites = Settings.bAllowInvites ? EOS_TRUE : EOS_FALSE;
+		// Required for EOS_Lobby_JoinLobbyById, which is the only way into a lobby that is not
+		// discoverable by search. It is what makes "invisible to everyone, joinable by whoever was given
+		// the id" possible, and is exactly the case the SDK documents it for: an integrated platform's
+		// invite system (Steam) carrying the lobby id to the invited player.
+		CreateOptions.bEnableJoinById = EOS_TRUE;
 		CreateOptions.BucketId = GLobbyBucketId;
 		// Host leaving destroys the lobby, matching the previous Sessions semantics: members receive
 		// EOS_LMS_CLOSED and the OnSessionEnded sink fires.
@@ -596,75 +698,73 @@ namespace GamingServices
 			return;
 		}
 
-		// Look the lobby up by its exact id (a shared "join code"), then hand the resulting details to the
-		// normal JoinSession so member setup / notifications stay identical to a search- or invite-based join.
-		EOS_Lobby_CreateLobbySearchOptions SearchOptions = {};
-		SearchOptions.ApiVersion = EOS_LOBBY_CREATELOBBYSEARCH_API_LATEST;
-		SearchOptions.MaxResults = 1;
-
-		EOS_HLobbySearch SearchHandle = nullptr;
-		if (EOS_Lobby_CreateLobbySearch(LobbyHandle(Core), &SearchOptions, &SearchHandle) != EOS_EResult::EOS_Success)
+		if (bIsInLobby)
 		{
-			UE_LOG(LogTemp, Error, TEXT("EOSGamingService: JoinLobbyById failed to create lobby search"));
-			Callback(FSessionJoinResult(false));
+			UE_LOG(LogTemp, Warning, TEXT("EOSGamingService: Already in a lobby, leaving old lobby first"));
+			LeaveSession([this, LobbyId, Callback](const FGamingServiceResult&)
+			{
+				JoinLobbyById(LobbyId, Callback);
+			});
 			return;
 		}
 
+		// Joined by id rather than through a search result, because the lobbies this creates are
+		// EOS_LPL_INVITEONLY: deliberately absent from every search, including a search for their own id.
+		// EOS_Lobby_JoinLobbyById is the only way in, and works for anyone holding the id — which is how a
+		// Steam-delivered invite gets its recipient into an EOS lobby.
 		const std::string LobbyIdUtf8 = TCHAR_TO_UTF8(*LobbyId);
-		EOS_LobbySearch_SetLobbyIdOptions IdOptions = {};
-		IdOptions.ApiVersion = EOS_LOBBYSEARCH_SETLOBBYID_API_LATEST;
-		IdOptions.LobbyId = LobbyIdUtf8.c_str();
-		EOS_LobbySearch_SetLobbyId(SearchHandle, &IdOptions);
+		EOS_Lobby_JoinLobbyByIdOptions JoinOptions = {};
+		JoinOptions.ApiVersion = EOS_LOBBY_JOINLOBBYBYID_API_LATEST;
+		JoinOptions.LocalUserId = ProductUserId(Core);
+		JoinOptions.LobbyId = LobbyIdUtf8.c_str();
+		JoinOptions.bPresenceEnabled = EOS_FALSE;
 
-		struct FJoinByIdCtx
-		{
-			FEOSMatchmaking* Service;
-			TFunction<void(const FSessionJoinResult&)> Callback;
-			EOS_HLobbySearch SearchHandle;
-			FString LobbyId;
-		};
-		auto* JoinByIdCtx = new FJoinByIdCtx{this, MoveTemp(Callback), SearchHandle, LobbyId};
-
-		EOS_LobbySearch_FindOptions FindOptions = {};
-		FindOptions.ApiVersion = EOS_LOBBYSEARCH_FIND_API_LATEST;
-		FindOptions.LocalUserId = ProductUserId(Core);
-
-		EOS_LobbySearch_Find(
-			SearchHandle,
-			&FindOptions,
-			JoinByIdCtx,
-			[](const EOS_LobbySearch_FindCallbackInfo* Data)
+		EOS_Lobby_JoinLobbyById(
+			LobbyHandle(Core),
+			&JoinOptions,
+			FSessionJoinCallbackCtx::Create(this, MoveTemp(Callback)),
+			[](const EOS_Lobby_JoinLobbyByIdCallbackInfo* Data)
 			{
 				check(Data);
 				check(Data->ClientData);
-				const TUniquePtr<FJoinByIdCtx> LocalCtx(static_cast<FJoinByIdCtx*>(Data->ClientData));
+				auto* LocalCtx = static_cast<FSessionJoinCallbackCtx*>(Data->ClientData);
 				FEOSMatchmaking* Self = LocalCtx->Service;
 				check(Self);
 
-				EOS_HLobbyDetails Details = nullptr;
-				if (Data->ResultCode == EOS_EResult::EOS_Success)
+				FSessionJoinResult Result;
+				Result.bSuccess = (Data->ResultCode == EOS_EResult::EOS_Success);
+				if (!Result.bSuccess)
 				{
-					EOS_LobbySearch_CopySearchResultByIndexOptions CopyOptions = {};
-					CopyOptions.ApiVersion = EOS_LOBBYSEARCH_COPYSEARCHRESULTBYINDEX_API_LATEST;
-					CopyOptions.LobbyIndex = 0;
-					EOS_LobbySearch_CopySearchResultByIndex(LocalCtx->SearchHandle, &CopyOptions, &Details);
-				}
-				EOS_LobbySearch_Release(LocalCtx->SearchHandle);
-
-				if (!Details)
-				{
-					UE_LOG(LogTemp, Error,
-					       TEXT("EOSGamingService: JoinLobbyById found no lobby for id '%s' (result %d)"),
-					       *LocalCtx->LobbyId, (int32)Data->ResultCode);
-					LocalCtx->Callback(FSessionJoinResult(false));
+					UE_LOG(LogTemp, Error, TEXT("EOSGamingService: JoinLobbyById failed: %d"), (int32)Data->ResultCode);
+					FSessionJoinCallbackCtx::Complete(LocalCtx, Result);
 					return;
 				}
 
-				// The join handle owns Details from here; session name resolves from the advertised attribute.
-				const FString SessionName = GetLobbyAttribute(Details, GSessionNameAttributeKey);
-				FSessionJoinHandle JoinHandle;
-				JoinHandle.BackendHandle = MakeShared<FEOSSessionJoinHandle>(Details, LocalCtx->LobbyId, SessionName);
-				Self->JoinSession(JoinHandle, LocalCtx->Callback);
+				const FString JoinedLobbyId = Data->LobbyId ? UTF8_TO_TCHAR(Data->LobbyId) : FString();
+
+				// Details are only reachable once we are a member, so they are copied here rather than
+				// coming from a search result.
+				const std::string JoinedIdUtf8 = TCHAR_TO_UTF8(*JoinedLobbyId);
+				EOS_Lobby_CopyLobbyDetailsHandleOptions CopyOptions = {};
+				CopyOptions.ApiVersion = EOS_LOBBY_COPYLOBBYDETAILSHANDLE_API_LATEST;
+				CopyOptions.LobbyId = JoinedIdUtf8.c_str();
+				CopyOptions.LocalUserId = ProductUserId(Self->Core);
+
+				EOS_HLobbyDetails Details = nullptr;
+				if (EOS_Lobby_CopyLobbyDetailsHandle(LobbyHandle(Self->Core), &CopyOptions, &Details) !=
+					EOS_EResult::EOS_Success || !Details)
+				{
+					UE_LOG(LogTemp, Error,
+					       TEXT("EOSGamingService: Joined lobby %s but could not read its details"), *JoinedLobbyId);
+					Result.bSuccess = false;
+					FSessionJoinCallbackCtx::Complete(LocalCtx, Result);
+					return;
+				}
+
+				Self->FinalizeJoinedLobby(Details, JoinedLobbyId, FString(), Result);
+				EOS_LobbyDetails_Release(Details);
+
+				FSessionJoinCallbackCtx::Complete(LocalCtx, Result);
 			});
 	}
 
@@ -674,14 +774,32 @@ namespace GamingServices
 		checkf(Core.IsInitialized() && Core.IsLoggedIn() && Core.GetLobbyHandle(),
 		       TEXT("EOSGamingService: JoinSession called when service not ready"));
 
-		const TSharedPtr<FEOSSessionJoinHandle> Handle =
-			StaticCastSharedPtr<FEOSSessionJoinHandle>(JoinHandle.BackendHandle);
-		if (!Handle.IsValid() || !Handle->Handle)
+		if (!JoinHandle.BackendHandle.IsValid())
 		{
 			UE_LOG(LogTemp, Error, TEXT("EOSGamingService: JoinSession requires a lobby from FindSessions or an invite."));
 			Callback(FSessionJoinResult(false));
 			return;
 		}
+
+		// A handle carrying only an id (a shared join code, or an invite delivered through another
+		// platform) has no lobby details to join through — resolve it by id instead. Checked before the
+		// cast below, which is only valid for this backend's own handle type.
+		if (!JoinHandle.BackendHandle->HasBackendDetails())
+		{
+			const FString LobbyIdOnly = JoinHandle.BackendHandle->GetLobbyId();
+			if (LobbyIdOnly.IsEmpty())
+			{
+				UE_LOG(LogTemp, Error, TEXT("EOSGamingService: JoinSession got a handle with neither lobby details nor an id."));
+				Callback(FSessionJoinResult(false));
+				return;
+			}
+			UE_LOG(LogTemp, Log, TEXT("EOSGamingService: JoinSession resolving id-only handle '%s'"), *LobbyIdOnly);
+			JoinLobbyById(LobbyIdOnly, MoveTemp(Callback));
+			return;
+		}
+
+		const TSharedPtr<FEOSSessionJoinHandle> Handle =
+			StaticCastSharedPtr<FEOSSessionJoinHandle>(JoinHandle.BackendHandle);
 
 		if (bIsInLobby)
 		{
@@ -730,68 +848,80 @@ namespace GamingServices
 					return;
 				}
 
-				EOS_LobbyDetails_GetLobbyOwnerOptions OwnerOptions = {};
-				OwnerOptions.ApiVersion = EOS_LOBBYDETAILS_GETLOBBYOWNER_API_LATEST;
-				const EOS_ProductUserId Owner = EOS_LobbyDetails_GetLobbyOwner(LocalCtx->JoinHandle->Handle, &OwnerOptions);
-
-				Self->bIsInLobby = true;
-				Self->bIsLobbyOwner = false;
-				Self->CurrentLobbyId = Data->LobbyId ? UTF8_TO_TCHAR(Data->LobbyId) : LocalCtx->JoinHandle->LobbyId;
-				Self->CurrentLobbyOwnerPuid = PuidToString(Owner);
-				Self->CurrentSessionName = LocalCtx->JoinHandle->SessionName;
-
-				Result.SessionInfo.SessionName = Self->CurrentSessionName;
-				Result.SessionInfo.HostUserId = Self->CurrentLobbyOwnerPuid;
-				Result.SessionInfo.HostDisplayName = GetMemberAttribute(
-					LocalCtx->JoinHandle->Handle, Owner, GDisplayNameAttributeKey);
-
-				UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Joined lobby %s"), *Self->CurrentLobbyId);
-
-				// Advertise this member's display name so the host's join notification carries a real name.
-				{
-					const std::string LobbyIdUtf8 = TCHAR_TO_UTF8(*Self->CurrentLobbyId);
-					EOS_Lobby_UpdateLobbyModificationOptions ModOptions = {};
-					ModOptions.ApiVersion = EOS_LOBBY_UPDATELOBBYMODIFICATION_API_LATEST;
-					ModOptions.LocalUserId = ProductUserId(Self->Core);
-					ModOptions.LobbyId = LobbyIdUtf8.c_str();
-
-					EOS_HLobbyModification Modification = nullptr;
-					if (EOS_Lobby_UpdateLobbyModification(LobbyHandle(Self->Core), &ModOptions, &Modification) ==
-						EOS_EResult::EOS_Success)
-					{
-						const FTCHARToUTF8 DisplayNameUtf8(*Self->Core.GetDisplayName());
-						EOS_Lobby_AttributeData NameData = {};
-						NameData.ApiVersion = EOS_LOBBY_ATTRIBUTEDATA_API_LATEST;
-						NameData.Key = GDisplayNameAttributeKey;
-						NameData.ValueType = EOS_EAttributeType::EOS_AT_STRING;
-						NameData.Value.AsUtf8 = DisplayNameUtf8.Get();
-
-						EOS_LobbyModification_AddMemberAttributeOptions MemberAttrOptions = {};
-						MemberAttrOptions.ApiVersion = EOS_LOBBYMODIFICATION_ADDMEMBERATTRIBUTE_API_LATEST;
-						MemberAttrOptions.Attribute = &NameData;
-						MemberAttrOptions.Visibility = EOS_ELobbyAttributeVisibility::EOS_LAT_PUBLIC;
-						EOS_LobbyModification_AddMemberAttribute(Modification, &MemberAttrOptions);
-
-						EOS_Lobby_UpdateLobbyOptions UpdateOptions = {};
-						UpdateOptions.ApiVersion = EOS_LOBBY_UPDATELOBBY_API_LATEST;
-						UpdateOptions.LobbyModificationHandle = Modification;
-						EOS_Lobby_UpdateLobby(
-							LobbyHandle(Self->Core), &UpdateOptions, Modification,
-							[](const EOS_Lobby_UpdateLobbyCallbackInfo* UpdateData)
-							{
-								if (UpdateData->ResultCode != EOS_EResult::EOS_Success)
-								{
-									UE_LOG(LogTemp, Warning,
-									       TEXT("EOSGamingService: Failed to advertise member display name: %d"),
-									       (int32)UpdateData->ResultCode);
-								}
-								EOS_LobbyModification_Release(
-									static_cast<EOS_HLobbyModification>(UpdateData->ClientData));
-							});
-					}
-				}
+				Self->FinalizeJoinedLobby(
+					LocalCtx->JoinHandle->Handle,
+					Data->LobbyId ? UTF8_TO_TCHAR(Data->LobbyId) : LocalCtx->JoinHandle->LobbyId,
+					LocalCtx->JoinHandle->SessionName,
+					Result);
 
 				FSessionJoinCallbackCtx::Complete(LocalCtx->Ctx, Result);
+			});
+	}
+
+	void FEOSMatchmaking::FinalizeJoinedLobby(void* LobbyDetails, const FString& LobbyId,
+	                                          const FString& SessionName, FSessionJoinResult& OutResult)
+	{
+		const EOS_HLobbyDetails Details = static_cast<EOS_HLobbyDetails>(LobbyDetails);
+
+		EOS_LobbyDetails_GetLobbyOwnerOptions OwnerOptions = {};
+		OwnerOptions.ApiVersion = EOS_LOBBYDETAILS_GETLOBBYOWNER_API_LATEST;
+		const EOS_ProductUserId Owner = EOS_LobbyDetails_GetLobbyOwner(Details, &OwnerOptions);
+
+		bIsInLobby = true;
+		bIsLobbyOwner = false;
+		CurrentLobbyId = LobbyId;
+		CurrentLobbyOwnerPuid = PuidToString(Owner);
+		CurrentSessionName = SessionName.IsEmpty()
+			                     ? GetLobbyAttribute(Details, GSessionNameAttributeKey)
+			                     : SessionName;
+
+		OutResult.SessionInfo.SessionName = CurrentSessionName;
+		OutResult.SessionInfo.HostUserId = CurrentLobbyOwnerPuid;
+		OutResult.SessionInfo.HostDisplayName = GetMemberAttribute(Details, Owner, GDisplayNameAttributeKey);
+
+		UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Joined lobby %s"), *CurrentLobbyId);
+
+		// Advertise this member's display name so the host's join notification carries a real name.
+		const std::string LobbyIdUtf8 = TCHAR_TO_UTF8(*CurrentLobbyId);
+		EOS_Lobby_UpdateLobbyModificationOptions ModOptions = {};
+		ModOptions.ApiVersion = EOS_LOBBY_UPDATELOBBYMODIFICATION_API_LATEST;
+		ModOptions.LocalUserId = ProductUserId(Core);
+		ModOptions.LobbyId = LobbyIdUtf8.c_str();
+
+		EOS_HLobbyModification Modification = nullptr;
+		if (EOS_Lobby_UpdateLobbyModification(LobbyHandle(Core), &ModOptions, &Modification) !=
+			EOS_EResult::EOS_Success)
+		{
+			return;
+		}
+
+		const FTCHARToUTF8 DisplayNameUtf8(*Core.GetDisplayName());
+		EOS_Lobby_AttributeData NameData = {};
+		NameData.ApiVersion = EOS_LOBBY_ATTRIBUTEDATA_API_LATEST;
+		NameData.Key = GDisplayNameAttributeKey;
+		NameData.ValueType = EOS_EAttributeType::EOS_AT_STRING;
+		NameData.Value.AsUtf8 = DisplayNameUtf8.Get();
+
+		EOS_LobbyModification_AddMemberAttributeOptions MemberAttrOptions = {};
+		MemberAttrOptions.ApiVersion = EOS_LOBBYMODIFICATION_ADDMEMBERATTRIBUTE_API_LATEST;
+		MemberAttrOptions.Attribute = &NameData;
+		MemberAttrOptions.Visibility = EOS_ELobbyAttributeVisibility::EOS_LAT_PUBLIC;
+		EOS_LobbyModification_AddMemberAttribute(Modification, &MemberAttrOptions);
+
+		EOS_Lobby_UpdateLobbyOptions UpdateOptions = {};
+		UpdateOptions.ApiVersion = EOS_LOBBY_UPDATELOBBY_API_LATEST;
+		UpdateOptions.LobbyModificationHandle = Modification;
+		EOS_Lobby_UpdateLobby(
+			LobbyHandle(Core), &UpdateOptions, Modification,
+			[](const EOS_Lobby_UpdateLobbyCallbackInfo* UpdateData)
+			{
+				if (UpdateData->ResultCode != EOS_EResult::EOS_Success)
+				{
+					UE_LOG(LogTemp, Warning,
+					       TEXT("EOSGamingService: Failed to advertise member display name: %d"),
+					       (int32)UpdateData->ResultCode);
+				}
+				EOS_LobbyModification_Release(static_cast<EOS_HLobbyModification>(UpdateData->ClientData));
 			});
 	}
 
@@ -1171,15 +1301,163 @@ namespace GamingServices
 			return;
 		}
 
-		// EOS doesn't have a friend-picker dialog like Steam overlay.
-		// Use the EOS UI Social Overlay to let the user pick friends if available.
-		// For now we report success so calling code can implement a custom friend picker.
-		UE_LOG(LogTemp, Log, TEXT("EOSGamingService: EOS does not provide a built-in invite friends dialog. Use platform-specific overlay or custom UI."));
+		// EOS has no friend-picker overlay of its own. Report failure rather than success: claiming to have
+		// shown a dialog that does not exist leaves the caller believing the player is picking friends, so
+		// its button looks dead instead of falling through to the in-game picker. Callers branch on
+		// PlatformOwnsInviteUI() to choose up front; this is the backstop for the ones that just call.
+		UE_LOG(LogTemp, Log,
+		       TEXT("EOSGamingService: no built-in invite dialog on this backend - the game must show its own"));
 
 		if (Callback)
 		{
-			Callback(FGamingServiceResult(true));
+			Callback(FGamingServiceResult(false));
 		}
+	}
+
+	bool FEOSMatchmaking::PlatformOwnsInviteUI() const
+	{
+		// The EOS Social Overlay presents incoming invites itself, and it exists on desktop only - there is
+		// no overlay on Android or iOS, where an invite that the game does not draw is an invite the player
+		// never sees. So this is a platform split, not a backend-wide answer.
+		//
+		// Caveat worth knowing if desktop invites ever stop appearing: the overlay is only present when the
+		// title runs with it loaded (launched through the Epic launcher or the EOS bootstrapper). A build
+		// started without it would report true here and then show nothing, in which case this wants to
+		// become a runtime check rather than a compile-time one.
+#if PLATFORM_DESKTOP
+		return true;
+#else
+		return false;
+#endif
+	}
+
+	void FEOSMatchmaking::QueryPendingInvites(TFunction<void(const FPendingInvitesResult&)> Callback)
+	{
+		check(Callback);
+
+		if (!LobbyHandle(Core) || !ProductUserId(Core))
+		{
+			UE_LOG(LogTemp, Warning, TEXT("EOSGamingService: cannot query invites - not signed in"));
+			Callback(FPendingInvitesResult(false));
+			return;
+		}
+
+		EOS_Lobby_QueryInvitesOptions Options = {};
+		Options.ApiVersion = EOS_LOBBY_QUERYINVITES_API_LATEST;
+		Options.LocalUserId = ProductUserId(Core);
+
+		struct FQueryInvitesCtx
+		{
+			FEOSMatchmaking* Service = nullptr;
+			TFunction<void(const FPendingInvitesResult&)> Callback;
+		};
+		auto* Ctx = new FQueryInvitesCtx{this, MoveTemp(Callback)};
+
+		EOS_Lobby_QueryInvites(
+			LobbyHandle(Core),
+			&Options,
+			Ctx,
+			[](const EOS_Lobby_QueryInvitesCallbackInfo* Data)
+			{
+				check(Data);
+				auto* LocalCtx = static_cast<FQueryInvitesCtx*>(Data->ClientData);
+				FEOSMatchmaking* Self = LocalCtx->Service;
+
+				FPendingInvitesResult Result;
+
+				// The query only refreshes the local cache; the invites themselves are read back out of it
+				// index by index below. EOS_NotFound simply means the cache is empty, which is the ordinary
+				// case and not a failure worth reporting as one.
+				const bool bQueryOk = Data->ResultCode == EOS_EResult::EOS_Success ||
+					Data->ResultCode == EOS_EResult::EOS_NotFound;
+
+				if (bQueryOk && Self && LobbyHandle(Self->Core) && ProductUserId(Self->Core))
+				{
+					Result.bSuccess = true;
+
+					EOS_Lobby_GetInviteCountOptions CountOptions = {};
+					CountOptions.ApiVersion = EOS_LOBBY_GETINVITECOUNT_API_LATEST;
+					CountOptions.LocalUserId = ProductUserId(Self->Core);
+
+					const uint32 Count = EOS_Lobby_GetInviteCount(LobbyHandle(Self->Core), &CountOptions);
+					for (uint32 Index = 0; Index < Count; ++Index)
+					{
+						EOS_Lobby_GetInviteIdByIndexOptions IdOptions = {};
+						IdOptions.ApiVersion = EOS_LOBBY_GETINVITEIDBYINDEX_API_LATEST;
+						IdOptions.LocalUserId = ProductUserId(Self->Core);
+						IdOptions.Index = Index;
+
+						char IdBuffer[EOS_LOBBY_INVITEID_MAX_LENGTH + 1] = {};
+						int32 IdLength = sizeof(IdBuffer);
+						if (EOS_Lobby_GetInviteIdByIndex(LobbyHandle(Self->Core), &IdOptions, IdBuffer, &IdLength) !=
+							EOS_EResult::EOS_Success)
+						{
+							continue;
+						}
+
+						// The sender is not exposed by the invite cache; it is read off the lobby details
+						// inside BuildInviteInfo, so pass null and let the display name come from there.
+						FLobbyInviteReceivedInfo Info;
+						if (BuildInviteInfo(Self->Core, IdBuffer, nullptr, Info))
+						{
+							Result.Invites.Add(MoveTemp(Info));
+						}
+					}
+				}
+
+				UE_LOG(LogTemp, Log, TEXT("EOSGamingService: pending invite query -> %d invite(s), result %d"),
+				       Result.Invites.Num(), (int32)Data->ResultCode);
+
+				if (LocalCtx->Callback)
+				{
+					LocalCtx->Callback(Result);
+				}
+				delete LocalCtx;
+			});
+	}
+
+	void FEOSMatchmaking::RejectInvite(const FString& InviteId,
+	                                   TFunction<void(const FGamingServiceResult&)> Callback)
+	{
+		if (InviteId.IsEmpty() || !LobbyHandle(Core) || !ProductUserId(Core))
+		{
+			UE_LOG(LogTemp, Error, TEXT("EOSGamingService: cannot reject invite - no invite id or not signed in"));
+			if (Callback)
+			{
+				Callback(FGamingServiceResult(false));
+			}
+			return;
+		}
+
+		// Must outlive EOS_Lobby_RejectInvite below, which copies the string out of the options struct.
+		const std::string InviteIdUtf8 = TCHAR_TO_UTF8(*InviteId);
+
+		EOS_Lobby_RejectInviteOptions Options = {};
+		Options.ApiVersion = EOS_LOBBY_REJECTINVITE_API_LATEST;
+		Options.InviteId = InviteIdUtf8.c_str();
+		Options.LocalUserId = ProductUserId(Core);
+
+		auto* Ctx = new TFunction<void(const FGamingServiceResult&)>(MoveTemp(Callback));
+
+		EOS_Lobby_RejectInvite(
+			LobbyHandle(Core),
+			&Options,
+			Ctx,
+			[](const EOS_Lobby_RejectInviteCallbackInfo* Data)
+			{
+				check(Data);
+				auto* LocalCtx = static_cast<TFunction<void(const FGamingServiceResult&)>*>(Data->ClientData);
+
+				const bool bSuccess = Data->ResultCode == EOS_EResult::EOS_Success;
+				UE_LOG(LogTemp, Log, TEXT("EOSGamingService: reject invite %hs -> %d"),
+				       Data->InviteId ? Data->InviteId : "null", (int32)Data->ResultCode);
+
+				if (LocalCtx && *LocalCtx)
+				{
+					(*LocalCtx)(FGamingServiceResult(bSuccess));
+				}
+				delete LocalCtx;
+			});
 	}
 
 	FString FEOSMatchmaking::GetSessionConnectionString() const
@@ -1194,4 +1472,4 @@ namespace GamingServices
 	}
 }
 
-#endif // USE_EOS
+#endif // GS_WITH_EOS

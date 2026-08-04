@@ -1,6 +1,6 @@
 #pragma once
 
-#ifdef USE_STEAMWORKS
+#ifdef GS_WITH_STEAM
 
 #include "CoreMinimal.h"
 #include "Native/Interfaces/IMatchmakingService.h"
@@ -46,6 +46,18 @@ namespace GamingServices
 
 		virtual FString GetSessionConnectionString() const override;
 
+		// The Steam overlay shows the invite and takes the accept / decline. The game never sees the invite
+		// before that decision, so OnLobbyInviteReceived never fires here and drawing a toast would double
+		// up with the overlay the player is already using.
+		virtual bool PlatformOwnsInviteUI() const override;
+
+		// Nothing to reject: by the time Steam tells us anything, the player already chose in the overlay.
+		virtual void RejectInvite(const FString& InviteId,
+		                          TFunction<void(const FGamingServiceResult&)> Callback) override;
+
+		// Steam keeps pending invites in the overlay and the friends list, not somewhere the game can read.
+		virtual void QueryPendingInvites(TFunction<void(const FPendingInvitesResult&)> Callback) override;
+
 		/** Drives pending lobby-search contexts; called each frame by the owning service. */
 		void Tick();
 
@@ -58,4 +70,4 @@ namespace GamingServices
 	};
 }
 
-#endif // USE_STEAMWORKS
+#endif // GS_WITH_STEAM

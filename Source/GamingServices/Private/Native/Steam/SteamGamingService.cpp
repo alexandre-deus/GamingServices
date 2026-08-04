@@ -1,4 +1,4 @@
-#ifdef USE_STEAMWORKS
+#ifdef GS_WITH_STEAM
 
 #include "Native/Steam/SteamGamingService.h"
 
@@ -12,6 +12,9 @@
 #include "Native/Steam/Interfaces/SteamMatchmaking.h"
 #include "Native/Steam/Interfaces/SteamUser.h"
 #include "Native/Steam/Interfaces/SteamP2PTransport.h"
+#include "Native/Steam/Interfaces/SteamExternalAuth.h"
+#include "Native/Steam/Interfaces/SteamInviteTransport.h"
+#include "Native/Steam/Interfaces/SteamFriends.h"
 
 namespace GamingServices
 {
@@ -27,6 +30,9 @@ namespace GamingServices
 		Stats = MakeUnique<FSteamStats>(*Core);
 		CloudStorage = MakeUnique<FSteamCloudStorage>(*Core);
 		RemoteSettings = MakeUnique<FRemoteSettingsStore>(*CloudStorage);
+		ExternalAuth = MakeUnique<FSteamExternalAuth>(*Core);
+		InviteTransport = MakeUnique<FSteamInviteTransport>(*Core);
+		Friends = MakeUnique<FSteamFriends>(*Core, *InviteTransport);
 	}
 
 	FSteamGamingService::~FSteamGamingService() = default;
@@ -63,6 +69,11 @@ namespace GamingServices
 	IRemoteSettingsService* FSteamGamingService::GetRemoteSettings() const { return RemoteSettings.Get(); }
 	IMatchmakingService*    FSteamGamingService::GetMatchmaking()    const { return Matchmaking.Get(); }
 	IUserService*           FSteamGamingService::GetUser()           const { return User.Get(); }
+	IFriendsService*        FSteamGamingService::GetFriends()        const { return Friends.Get(); }
+
+	IExternalAuthProvider* FSteamGamingService::GetExternalAuthProvider() const { return ExternalAuth.Get(); }
+
+	IInviteTransport* FSteamGamingService::GetInviteTransport() const { return InviteTransport.Get(); }
 
 	IP2PTransport* FSteamGamingService::GetP2PTransport()
 	{
@@ -76,4 +87,4 @@ namespace GamingServices
 	}
 }
 
-#endif // USE_STEAMWORKS
+#endif // GS_WITH_STEAM

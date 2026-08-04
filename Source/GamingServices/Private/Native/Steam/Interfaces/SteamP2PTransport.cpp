@@ -1,6 +1,6 @@
 // Copyright Mindera. All Rights Reserved.
 
-#ifdef USE_STEAMWORKS
+#ifdef GS_WITH_STEAM
 
 #include "Native/Steam/Interfaces/SteamP2PTransport.h"
 
@@ -282,4 +282,4 @@ namespace GamingServices
 	}
 }
 
-#endif // USE_STEAMWORKS
+#endif // GS_WITH_STEAM

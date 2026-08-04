@@ -1,6 +1,6 @@
 #pragma once
 
-#if defined(USE_EOS)
+#if defined(GS_WITH_EOS)
 
 #include "CoreMinimal.h"
 #include "Native/Interfaces/IUserService.h"
@@ -40,4 +40,4 @@ namespace GamingServices
 	};
 }
 
-#endif // USE_EOS
+#endif // GS_WITH_EOS

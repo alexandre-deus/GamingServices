@@ -1,6 +1,6 @@
 #pragma once
 
-#if defined(USE_EOS)
+#if defined(GS_WITH_EOS)
 
 #include "CoreMinimal.h"
 #include "Native/Interfaces/IMatchmakingService.h"
@@ -49,6 +49,15 @@ namespace GamingServices
 
 		virtual FString GetSessionConnectionString() const override;
 
+		// True on desktop, where the EOS Social Overlay shows invites; false on mobile, which has no
+		// overlay. See the implementation for why this is a platform split rather than a fixed answer.
+		virtual bool PlatformOwnsInviteUI() const override;
+
+		virtual void RejectInvite(const FString& InviteId,
+		                          TFunction<void(const FGamingServiceResult&)> Callback) override;
+
+		virtual void QueryPendingInvites(TFunction<void(const FPendingInvitesResult&)> Callback) override;
+
 	private:
 		// Applies Settings onto the current lobby via EOS_Lobby_UpdateLobbyModification + UpdateLobby.
 		// Shared by UpdateSession / LockLobby / UnlockLobby (and CreateSession's post-create attribute pass).
@@ -61,6 +70,17 @@ namespace GamingServices
 		void UnregisterLobbyNotifications();
 
 		void ResetLobbyState();
+
+		/**
+		 * Shared tail of both join paths (details-handle join and join-by-id): caches the lobby state from
+		 * the joined lobby, fills OutResult, and advertises this member's display name so the host's join
+		 * notification carries a real name.
+		 *
+		 * LobbyDetails is an EOS_HLobbyDetails passed as void* to keep this header SDK-free, and stays
+		 * owned by the caller.
+		 */
+		void FinalizeJoinedLobby(void* LobbyDetails, const FString& LobbyId, const FString& SessionName,
+		                         FSessionJoinResult& OutResult);
 
 		FEOSPlatformCore& Core;
 
@@ -75,8 +95,9 @@ namespace GamingServices
 		// EOS_NotificationId (uint64); 0 == EOS_INVALID_NOTIFICATIONID. Stored as uint64 so this header
 		// stays SDK-free.
 		uint64 LobbyInviteAcceptedNotificationId = 0;
+		uint64 LobbyInviteReceivedNotificationId = 0;
 		uint64 LobbyMemberStatusNotificationId = 0;
 	};
 }
 
-#endif // USE_EOS
+#endif // GS_WITH_EOS

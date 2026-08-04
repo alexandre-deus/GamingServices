@@ -1,11 +1,10 @@
 // Copyright Mindera. All Rights Reserved.
 
-#if defined(USE_EOS)
+#if defined(GS_WITH_EOS)
 
 #include "Native/EOS/Interfaces/EOSP2PTransport.h"
 
-#include "eos_p2p.h"
-#include "eos_common.h"
+#include "EOSCommon.h"
 
 #include <string>
 
@@ -22,21 +21,6 @@ namespace GamingServices
 		SocketId.ApiVersion = EOS_P2P_SOCKETID_API_LATEST;
 		FCStringAnsi::Strncpy(SocketId.SocketName, GEOSSocketName, EOS_P2P_SOCKETID_SOCKETNAME_SIZE);
 		return SocketId;
-	}
-
-	static FString PuidToString(EOS_ProductUserId Puid)
-	{
-		if (!Puid)
-		{
-			return FString();
-		}
-		char Buffer[EOS_PRODUCTUSERID_MAX_LENGTH + 1];
-		int32_t Len = sizeof(Buffer);
-		if (EOS_ProductUserId_ToString(Puid, Buffer, &Len) == EOS_EResult::EOS_Success)
-		{
-			return UTF8_TO_TCHAR(Buffer);
-		}
-		return FString();
 	}
 
 	struct FEOSP2PTransport::FImpl
@@ -268,4 +252,4 @@ namespace GamingServices
 	}
 }
 
-#endif // USE_EOS
+#endif // GS_WITH_EOS

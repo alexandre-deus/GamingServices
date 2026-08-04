@@ -1,4 +1,4 @@
-#ifdef USE_STEAMWORKS
+#ifdef GS_WITH_STEAM
 
 #include "Native/Steam/Interfaces/SteamLeaderboards.h"
 #include "Native/Steam/SteamPlatformCore.h"
@@ -321,4 +321,4 @@ namespace GamingServices
 	}
 }
 
-#endif // USE_STEAMWORKS
+#endif // GS_WITH_STEAM

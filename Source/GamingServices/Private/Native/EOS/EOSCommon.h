@@ -1,25 +1,17 @@
 #pragma once
 
-#if defined(USE_EOS)
+#if defined(GS_WITH_EOS)
 
 #include "CoreMinimal.h"
 #include "Native/EOS/EOSPlatformCore.h"
 
-// The EOS SDK, included from one private place. The core header (EOSPlatformCore.h) is deliberately
-// SDK-free and exposes its handles / ids as opaque void*, so every capability .cpp reaches the SDK
-// through this umbrella instead.
-#include "eos_sdk.h"
-#include "eos_common.h"
-#include "eos_auth.h"
-#include "eos_achievements.h"
-#include "eos_stats.h"
-#include "eos_leaderboards.h"
-#include "eos_connect.h"
-#include "eos_logging.h"
-#include "eos_playerdatastorage.h"
-#include "eos_lobby.h"
-#include "eos_ecom.h"
-#include "eos_userinfo.h"
+// The single entry point every EOS capability .cpp includes for SDK access. It pulls in, in the one
+// order that works: the SDK headers, the runtime symbol table built from them, and the redirects that
+// rewrite EOS_* calls onto that table. Nothing may include an eos_*.h directly.
+//
+// The core header (EOSPlatformCore.h) is deliberately SDK-free and exposes its handles / ids as opaque
+// void*, so every capability .cpp reaches the SDK through this umbrella instead.
+#include "EOSDynamicApiRedirect.h"
 
 namespace GamingServices
 {
@@ -39,6 +31,24 @@ namespace GamingServices
 	{
 		return static_cast<EOS_ProductUserId>(Core.GetProductUserId());
 	}
+
+	/**
+	 * Render a ProductUserId as the string form the rest of the module passes around as a user id.
+	 * Empty for a null or unrenderable id.
+	 *
+	 * Shared here for the same reason as the cast above: more than one capability needs it, and
+	 * file-static copies collide once unity builds merge those translation units into one.
+	 */
+	inline FString PuidToString(EOS_ProductUserId Puid)
+	{
+		char Buffer[EOS_PRODUCTUSERID_MAX_LENGTH + 1];
+		int32_t BufferLength = sizeof(Buffer);
+		if (Puid && EOS_ProductUserId_ToString(Puid, Buffer, &BufferLength) == EOS_EResult::EOS_Success)
+		{
+			return UTF8_TO_TCHAR(Buffer);
+		}
+		return FString();
+	}
 }
 
-#endif // USE_EOS
+#endif // GS_WITH_EOS

@@ -1,7 +1,8 @@
-#ifdef USE_STEAMWORKS
+#ifdef GS_WITH_STEAM
 
 #include "Native/Steam/SteamPlatformCore.h"
 #include "SteamCallResultManager.h"
+#include "SteamDynamicApi.h"
 
 #include "HAL/PlatformMisc.h"
 #include "Misc/ConfigCacheIni.h"
@@ -20,6 +21,14 @@ namespace GamingServices
 
 	void FSteamPlatformCore::InitializePlatform()
 	{
+		// The SDK is not linked — check the library resolved before the first Steam call. A build or
+		// machine without it simply leaves this backend uninitialized.
+		if (!IsSteamApiAvailable())
+		{
+			UE_LOG(LogTemp, Log, TEXT("SteamworksGamingService: Steam library unavailable; Steam backend disabled"));
+			return;
+		}
+
 		int32 AppIdInt = 0;
 		if (!GConfig->GetInt(TEXT("GamingServices.Steamworks"), TEXT("AppId"), AppIdInt, GGameIni) || AppIdInt <= 0)
 		{
@@ -123,4 +132,4 @@ namespace GamingServices
 	}
 }
 
-#endif // USE_STEAMWORKS
+#endif // GS_WITH_STEAM

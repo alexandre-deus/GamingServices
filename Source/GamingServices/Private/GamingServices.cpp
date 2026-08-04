@@ -4,11 +4,8 @@
 #include "Native/GamingServiceFactory.h"
 #include "Native/Null/NullGamingService.h"
 
-#if defined(USE_STEAMWORKS) || defined(USE_EOS)
-#define MINDERA_P2P_NETDRIVER 1
 #include "SocketSubsystemModule.h"
 #include "NetDriver/MinderaSocketSubsystem.h"
-#endif
 
 IMPLEMENT_MODULE(FGamingServicesModule, GamingServices)
 
@@ -19,17 +16,27 @@ void FGamingServicesModule::StartupModule()
 	// (i.e. Standalone Game from the editor), false for PIE / regular editor.
 	const bool bUseRealService = FApp::IsGame();
 
-	// This module owns the single live platform backend — the decomposed Native/ service selected at
-	// build time (Steam/EOS/Null). UGamingPlatformSubsystem consumes and ticks this same instance, so
-	// exactly ONE backend ever inits the platform SDK. Outside a real game session (PIE / editor) we
-	// force the honest null backend regardless of the configured SDK.
-	Service = bUseRealService
-		? GamingServices::CreateGamingService()
-		: MakeUnique<GamingServices::FNullGamingService>();
+	// This module owns the live platform service. Which backend (or combination of backends) that is
+	// comes from the profile this build was compiled with (GS_PROFILE, see Native/GamingServiceProfile.h).
+	// Every vendored SDK is compiled in and none is bound at link time, so the profile picks an
+	// arrangement rather than gating what exists. UGamingPlatformSubsystem consumes and ticks this same
+	// instance, so exactly ONE service ever inits the platform SDKs. Outside a real game session
+	// (PIE / editor) we force the honest null backend regardless of the profile.
+	FGamingServiceConnectParams ConnectParams;
+	if (bUseRealService)
+	{
+		const FGamingServicesRuntimeConfig Config = FGamingServicesRuntimeConfig::Active();
+		UE_LOG(LogTemp, Log, TEXT("GamingServices: %s"), *Config.ToString());
+		ConnectParams = Config.ConnectParams;
+		Service = GamingServices::CreateGamingService(Config);
+	}
+	else
+	{
+		Service = MakeUnique<GamingServices::FNullGamingService>();
+	}
 
-	Service->InitializePlatform();
+	Service->InitializePlatform(ConnectParams);
 
-#ifdef MINDERA_P2P_NETDRIVER
 	if (bUseRealService)
 	{
 		FMinderaSocketSubsystem* SocketSubsystem = FMinderaSocketSubsystem::Create();
@@ -50,7 +57,6 @@ void FGamingServicesModule::StartupModule()
 			}
 		}
 	}
-#endif
 
 	// Tear the platform down on engine pre-exit rather than module shutdown.
 	// ShutdownModule runs very late in process teardown; by that point Steam often
@@ -75,7 +81,6 @@ void FGamingServicesModule::TearDownPlatform()
 
 void FGamingServicesModule::TearDownSocketSubsystem()
 {
-#ifdef MINDERA_P2P_NETDRIVER
 	if (bSocketSubsystemEnabled)
 	{
 		FModuleManager& ModuleManager = FModuleManager::Get();
@@ -88,7 +93,6 @@ void FGamingServicesModule::TearDownSocketSubsystem()
 		UE_LOG(LogTemp, Log, TEXT("GamingServices: Unregistered Mindera P2P socket subsystem"));
 		bSocketSubsystemEnabled = false;
 	}
-#endif
 }
 
 void FGamingServicesModule::ShutdownModule()

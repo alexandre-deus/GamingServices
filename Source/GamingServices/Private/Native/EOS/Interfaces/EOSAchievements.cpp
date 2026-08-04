@@ -1,4 +1,4 @@
-#if defined(USE_EOS)
+#if defined(GS_WITH_EOS)
 
 #include "Native/EOS/Interfaces/EOSAchievements.h"
 #include "EOSCommon.h"
@@ -158,4 +158,4 @@ namespace GamingServices
 	}
 }
 
-#endif // USE_EOS
+#endif // GS_WITH_EOS

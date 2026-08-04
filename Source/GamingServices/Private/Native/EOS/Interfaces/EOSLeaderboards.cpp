@@ -1,4 +1,4 @@
-#if defined(USE_EOS)
+#if defined(GS_WITH_EOS)
 
 #include "Native/EOS/Interfaces/EOSLeaderboards.h"
 #include "Native/EOS/Interfaces/EOSStats.h"
@@ -231,4 +231,4 @@ namespace GamingServices
 	}
 }
 
-#endif // USE_EOS
+#endif // GS_WITH_EOS

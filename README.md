@@ -67,11 +67,14 @@ GamingServices/
   - `ThirdParty/EOS/SDK/Lib`
   - `ThirdParty/EOS/SDK/Bin`
 
-The build script expects platform binaries at:
-- Windows: `EOSSDK-Win64-Shipping.lib` and `EOSSDK-Win64-Shipping.dll`
+The build script expects the runtime binary (in `Bin/`) at:
+- Windows: `EOSSDK-Win64-Shipping.dll`
 - Linux: `libEOSSDK-Linux-Shipping.so`
 - LinuxArm64: `libEOSSDK-LinuxArm64-Shipping.so`
 - Mac: `libEOSSDK-Mac-Shipping.dylib`
+
+> No import library is needed. The SDK is loaded and bound at runtime (see §3.3), so `Lib/` is
+> unused — only `Include/` and `Bin/` matter.
 
 For **Android**, download the separate "EOS SDK for Android" package and place it under `SDK-Android/`
 (it is a different, usually newer, release than the desktop SDK and is packaged as an AAR):
@@ -89,41 +92,132 @@ The AAR itself (runtime `.so` + JNI classes) is packaged into the APK by `EOS_An
 - Place contents so the following paths exist:
   - `ThirdParty/Steamworks/sdk/public`
   - `ThirdParty/Steamworks/sdk/redistributable_bin`
-  - Windows 64-bit redistributables:
-    - `ThirdParty/Steamworks/sdk/win64/steam_api64.dll`
-    - `ThirdParty/Steamworks/sdk/redistributable_bin/win64/steam_api64.lib`
+  - Windows: `ThirdParty/Steamworks/sdk/redistributable_bin/win64/steam_api64.dll`
   - Linux: `ThirdParty/Steamworks/sdk/redistributable_bin/linux64/libsteam_api.so`
   - Mac: `ThirdParty/Steamworks/sdk/redistributable_bin/osx/libsteam_api.dylib`
+
+> `steam_api64.lib` is not used — Steamworks is bound at runtime too (see §3.3).
 
 > Ensure your SDK versions match the expected filenames above.
 
 ---
 
-## 3) Selecting a Backend (EOS vs Steamworks)
-In `Source/GamingServices/GamingServices.Build.cs`, switch the backend define:
+## 3) Selecting a Backend
 
-```23:39:Source/GamingServices/GamingServices.Build.cs
-        // Switch backend here
-        const EServiceBackends backend = EServiceBackends.EpicOnlineServices;
+Every SDK you vendor is compiled in and nothing is linked. Which backends actually run, and how they
+are wired together, is a **profile declared in code** —
+`Public/Native/GamingServiceProfile.h` — selected by the `GS_PROFILE` macro.
 
-        switch (backend)
-        {
-            case EServiceBackends.EpicOnlineServices:
-                PublicDefinitions.Add("USE_EOS");
-                AddEOS(Target);
-                break;
-            case EServiceBackends.Steamworks:
-                AddSteamworks(Target);
-                PublicDefinitions.Add("USE_STEAMWORKS");
-                break;
-        }
+Config lives in code rather than ini on purpose: a build variant is then a one-token change that the
+build system tracks, and a typo is a compile error instead of a runtime fallback to the wrong backend.
+(`Game.ini` still holds credentials — just not the arrangement.)
+
+### 3.1) Picking a profile
+
+**The consuming game picks it, in its own target rules.** The plugin declares what the choices are and
+nothing else needs editing inside it:
+
+```csharp
+// YourGame.Target.cs
+ProjectDefinitions.Add("GS_PROFILE=SteamAuthIntoEpic");
 ```
 
-Set `backend` to `EpicOnlineServices` or `Steamworks` and rebuild.
+Pin the same value in the editor target too — Standalone Game runs the editor binary with `-game`,
+where the real platform service comes up, so a mismatch means editor testing exercises a different
+arrangement than the packaged build.
 
-Notes:
-- This selection is a build-time choice that controls which backend implementation is compiled in and instantiated by the subsystem.
-- Your game code does not need `#if USE_EOS` / `#if USE_STEAMWORKS` around connect/login parameters. You can populate both sets of parameters; the active backend will read the relevant section and ignore the rest.
+A target that says nothing falls back to `DefaultProfile` in `GamingServices.Build.cs`, so the plugin
+builds standalone. That is a fallback, not the switch.
+
+Use `ProjectDefinitions`, **not** `GlobalDefinitions` — the latter alters the shared engine build
+environment, and UBT rejects it on an installed engine ("has build products in common with
+UnrealGame"). Setting it in the game *module*'s `Build.cs` does not work either: definitions there flow
+downstream to modules that depend on the game, while the plugin is upstream, so it would silently keep
+the fallback.
+
+> There is deliberately no environment-variable switch. UBT caches its module-rules evaluation and does
+> not treat the environment as a dependency, so an env-var override silently fails to take effect on an
+> already-built tree.
+
+### 3.2) The profiles
+
+| Profile | Arrangement |
+|---|---|
+| `EpicOnly` | Pure EOS. Epic account login, EOS for everything. **Default.** |
+| `SteamOnly` | Pure Steamworks. |
+| `SteamAuthIntoEpic` | Steam signs the player in, EOS runs the session. |
+| `SteamAuthIntoEpicWithSteamProfiles` | As above, plus Steam serves the user capability (so avatars work). |
+| `EpicPreferredSteamFallback` | EOS where available, Steam otherwise. Two single-backend paths, never combined. |
+| `Disabled` | Null backend; every capability honestly reports unsupported. |
+
+A profile is plain data, so a new variant costs one declaration:
+
+```cpp
+inline constexpr FGamingServiceProfile SteamAuthIntoEpic
+{
+    .Name = TEXT("SteamAuthIntoEpic"),
+    .Backends = { EGamingBackend::EpicOnlineServices },   // ordered; first that loads is primary
+    .AuthBackend = EGamingBackend::Steamworks,            // omit for a plain single backend
+    .bAllowAuthFallback = true,
+};
+```
+
+Only when a profile actually wires backends together (an `AuthBackend` other than the primary, or a
+`CapabilityOverrides` entry) does a composite service get built. Otherwise the factory hands back the
+single backend unwrapped — no wrapper, no routing, no overhead.
+
+### 3.3) Steam sign-in, EOS session
+
+With `SteamAuthIntoEpic`, Steam mints a web-API session ticket, EOS Connect consumes it, and everything
+after that — lobbies, P2P, stats, achievements, cloud saves — runs on EOS. The player never sees an
+Epic login, and no Epic account is created: the EOS `ProductUserId` is the identity.
+
+Requires a **Steam identity provider** configured in the EOS Dev Portal, with an identity string
+matching the one the client sends (`epiconlineservices` by default, overridable with
+`[GamingServices.Steamworks] WebApiIdentity`).
+
+Identity is split deliberately: `GetUserId()` returns the EOS id every other capability keys on, while
+display name and avatar come from Steam. The Steam persona is passed to EOS at login, so other players
+see it in lobbies and on leaderboards. `bAllowAuthFallback` (default true) lets EOS's own login take
+over when Steam cannot vouch — e.g. the game was launched outside the Steam client.
+
+### 3.4) Testing one backend in isolation
+
+A debug override runs an existing build against a single backend without rebuilding it, dropping any
+cross-backend wiring so that backend is exercised alone:
+
+```
+TurtleRock.exe -GamingBackend=Steam
+```
+
+### 3.5) Excluding a backend from the build entirely
+
+Rarely needed — an unused backend costs only its never-loaded staged library — but for a store build
+that must not ship the other platform's binary at all:
+
+```csharp
+ProjectDefinitions.Add("GS_EXCLUDE_STEAM=1");
+```
+
+### 3.3) How the SDKs are bound
+
+No import library and no delay-load entry is added for either SDK — the built binaries contain **zero**
+import-table references to `steam_api64.dll` or `EOSSDK-Win64-Shipping.dll`. Instead:
+
+- Every compiled-in backend's shared library is staged into one common folder:
+  `<Project>/Binaries/ThirdParty/GamingServices/<Platform>/`
+- EOS entry points are resolved into a symbol table at runtime
+  (`Private/Native/EOS/EOSDynamicApi.*`), and call sites are redirected onto it by
+  `EOSDynamicApiRedirect.h`, so capability code still reads as plain SDK usage.
+- Steamworks needs only its handful of global C entry points bound
+  (`Private/Native/Steam/SteamDynamicApi.cpp`); its C++ interfaces are pure-virtual and dispatch
+  through vtables from the library itself.
+
+A library that is missing or fails to resolve makes its backend report unavailable — the game still
+starts, and `GetCapabilities()` honestly reports what is missing.
+
+Game code never needs `#if` around connect/login parameters. Fill both `FEOSInitOptions` and
+`FSteamworksInitOptions`; each backend reads its own section and ignores the rest.
 
 ---
 

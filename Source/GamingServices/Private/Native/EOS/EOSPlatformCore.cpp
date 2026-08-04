@@ -1,22 +1,97 @@
-#if defined(USE_EOS)
+#if defined(GS_WITH_EOS)
 
 #include "Native/EOS/EOSPlatformCore.h"
 #include "EOSCommon.h"
 #include "EOSCallbackContext.h"
 
-#if PLATFORM_ANDROID
-#include "Android/eos_Android.h"
-#endif
-
 #include "HAL/PlatformFileManager.h"
 #include "Misc/Paths.h"
 #include "Misc/ConfigCacheIni.h"
 #include "Misc/FileHelper.h"
+#include "Misc/Base64.h"
 
 #include <string>
 
 namespace GamingServices
 {
+	namespace
+	{
+		/**
+		 * Log the scopes the EAS token was actually granted.
+		 *
+		 * Requesting a scope is not the same as receiving it: if the Dev Portal application does not have
+		 * the matching permission published, EOS still completes the login and simply issues a token
+		 * without that scope. The failure then surfaces much later and very indirectly — Friends and
+		 * Presence answer EOS_Success with an empty list, which is indistinguishable from "this account
+		 * genuinely has no friends". Logging the granted scopes at login makes that difference visible.
+		 *
+		 * The access token is a JWT; only the "scope" claim is pulled out, never the whole payload, so
+		 * this does not spill account identifiers or a replayable token into the log.
+		 */
+		void LogGrantedAuthScopes(const FString& AccessToken)
+		{
+			TArray<FString> Parts;
+			AccessToken.ParseIntoArray(Parts, TEXT("."));
+			if (Parts.Num() < 2)
+			{
+				UE_LOG(LogTemp, Warning, TEXT("EOSGamingService: auth token is not a JWT; cannot report granted scopes"));
+				return;
+			}
+
+			// JWTs use base64url and drop the padding; FBase64 wants standard base64 with it.
+			FString Payload = Parts[1].Replace(TEXT("-"), TEXT("+")).Replace(TEXT("_"), TEXT("/"));
+			while (Payload.Len() % 4 != 0)
+			{
+				Payload.AppendChar(TEXT('='));
+			}
+
+			FString Json;
+			if (!FBase64::Decode(Payload, Json))
+			{
+				UE_LOG(LogTemp, Warning, TEXT("EOSGamingService: could not decode auth token payload"));
+				return;
+			}
+
+			FString Scopes;
+			int32 KeyIndex = Json.Find(TEXT("\"scope\""));
+			if (KeyIndex != INDEX_NONE)
+			{
+				const int32 OpenQuote = Json.Find(TEXT("\""), ESearchCase::CaseSensitive,
+				                                  ESearchDir::FromStart, KeyIndex + 7 /* past "scope" */ + 1);
+				const int32 CloseQuote = OpenQuote == INDEX_NONE
+					? INDEX_NONE
+					: Json.Find(TEXT("\""), ESearchCase::CaseSensitive, ESearchDir::FromStart, OpenQuote + 1);
+				if (OpenQuote != INDEX_NONE && CloseQuote != INDEX_NONE)
+				{
+					Scopes = Json.Mid(OpenQuote + 1, CloseQuote - OpenQuote - 1);
+				}
+			}
+
+			if (Scopes.IsEmpty())
+			{
+				UE_LOG(LogTemp, Warning, TEXT("EOSGamingService: auth token carries no 'scope' claim"));
+				return;
+			}
+
+			const bool bFriends = Scopes.Contains(TEXT("friends"));
+			const bool bPresence = Scopes.Contains(TEXT("presence"));
+
+			UE_LOG(LogTemp, Log, TEXT("EOSGamingService: EAS token granted scopes: [%s]"), *Scopes);
+
+			if (!bFriends || !bPresence)
+			{
+				UE_LOG(LogTemp, Warning,
+				       TEXT("EOSGamingService: login requested friendsList+presence but the token GRANTED "
+				            "friends=%s presence=%s. An ungranted scope is why the friend list comes back "
+				            "empty with no error. Enable the matching permission for this application under "
+				            "Dev Portal > Product Settings > Epic Account Services > Permissions, then sign "
+				            "out and back in so a new consent is issued."),
+				       bFriends ? TEXT("YES") : TEXT("NO"),
+				       bPresence ? TEXT("YES") : TEXT("NO"));
+			}
+		}
+	}
+
 	// All EOS SDK handles / ids / cached definitions live here, hidden from the SDK-free core header.
 	struct FEOSPlatformCore::FImpl
 	{
@@ -31,6 +106,8 @@ namespace GamingServices
 		EOS_HEcom EcomHandle = nullptr;
 		EOS_HUserInfo UserInfoHandle = nullptr;
 		EOS_HP2P P2PHandle = nullptr;
+		EOS_HFriends FriendsHandle = nullptr;
+		EOS_HPresence PresenceHandle = nullptr;
 
 		EOS_EpicAccountId EpicAccountIdCached = nullptr;
 		EOS_ProductUserId ProductUserId = nullptr;
@@ -88,6 +165,8 @@ namespace GamingServices
 	void* FEOSPlatformCore::GetLobbyHandle() const { return Impl->LobbyHandle; }
 	void* FEOSPlatformCore::GetConnectHandle() const { return Impl->ConnectHandle; }
 	void* FEOSPlatformCore::GetUserInfoHandle() const { return Impl->UserInfoHandle; }
+	void* FEOSPlatformCore::GetFriendsHandle() const { return Impl->FriendsHandle; }
+	void* FEOSPlatformCore::GetPresenceHandle() const { return Impl->PresenceHandle; }
 	void* FEOSPlatformCore::GetP2PHandle() const { return Impl->P2PHandle; }
 	void* FEOSPlatformCore::GetEcomHandle() const { return Impl->EcomHandle; }
 
@@ -116,6 +195,14 @@ namespace GamingServices
 
 	void FEOSPlatformCore::InitializePlatform(const FEOSInitOptions& Overrides)
 	{
+		// The SDK is not linked — bind it before the first EOS call. A machine or build without the EOS
+		// library simply leaves this backend uninitialized, which the factory reports as unavailable.
+		if (!LoadEOSApi())
+		{
+			UE_LOG(LogTemp, Log, TEXT("EOSGamingService: EOS SDK library unavailable; EOS backend disabled"));
+			return;
+		}
+
 		const TCHAR* Section = TEXT("GamingServices.EOS");
 		FEOSInitOptions Opts;
 
@@ -282,10 +369,13 @@ namespace GamingServices
 
 		EOS_Auth_LoginOptions LoginOptions = {};
 		LoginOptions.ApiVersion = EOS_AUTH_LOGIN_API_LATEST;
-		// BasicProfile only. Presence/Friends require a published EAS consent screen (which needs a
-		// privacy-policy domain we don't have yet); requesting them when unauthorized loops the login.
-		// Lobby invites go through JoinLobbyById ("join code") instead, which needs no EAS scopes.
-		LoginOptions.ScopeFlags = EOS_EAuthScopeFlags::EOS_AS_BasicProfile;
+		// FriendsList and Presence back the in-game friend list (the EOS-only profile has no overlay to
+		// defer to). Both are Epic Account Services scopes, so each one also has to be published as a
+		// permission on this application in the Dev Portal — requesting a scope the application does not
+		// have does NOT fail the login, it just issues a token without it, and Friends/Presence then
+		// answer EOS_Success with an empty list. LogGrantedAuthScopes below reports what was actually
+		// granted so that case is not mistaken for "this account has no friends".
+		LoginOptions.ScopeFlags = EOS_EAuthScopeFlags::EOS_AS_BasicProfile | EOS_EAuthScopeFlags::EOS_AS_Presence | EOS_EAuthScopeFlags::EOS_AS_FriendsList;
 
 		EOS_Auth_Credentials Credentials = {};
 		Credentials.ApiVersion = EOS_AUTH_CREDENTIALS_API_LATEST;
@@ -376,15 +466,104 @@ namespace GamingServices
 			return;
 		}
 
+		// Copy before releasing: EOS owns the token allocation, and ConnectLoginWithToken keeps the
+		// string alive across the EOS_Connect_Login call itself.
+		const FString AccessToken = UTF8_TO_TCHAR(AuthToken->AccessToken);
+		EOS_Auth_Token_Release(AuthToken);
+
+		LogGrantedAuthScopes(AccessToken);
+
+		ConnectLoginWithToken(AccessToken, (int32)EOS_EExternalCredentialType::EOS_ECT_EPIC, FString(), MoveTemp(Callback));
+	}
+
+	bool FEOSPlatformCore::SupportsExternalCredential(EExternalCredentialType CredentialType)
+	{
+		switch (CredentialType)
+		{
+		case EExternalCredentialType::SteamSessionTicket:
+		case EExternalCredentialType::SteamAppTicket:
+		case EExternalCredentialType::EpicAccessToken:
+			return true;
+		default:
+			return false;
+		}
+	}
+
+	void FEOSPlatformCore::LoginWithExternalCredential(EExternalCredentialType CredentialType, const FString& Token,
+	                                                   const FString& InDisplayName,
+	                                                   TFunction<void(const FGamingServiceResult&)> Callback)
+	{
+		if (!Impl->ConnectHandle)
+		{
+			UE_LOG(LogTemp, Error, TEXT("EOSGamingService: external login attempted before the platform was initialized"));
+			Callback(FGamingServiceResult(false));
+			return;
+		}
+
+		if (!SupportsExternalCredential(CredentialType) || Token.IsEmpty())
+		{
+			UE_LOG(LogTemp, Error, TEXT("EOSGamingService: unusable external credential (type %s, %d chars)"),
+			       LexToString(CredentialType), Token.Len());
+			Callback(FGamingServiceResult(false));
+			return;
+		}
+
+		EOS_EExternalCredentialType EOSType;
+		switch (CredentialType)
+		{
+		case EExternalCredentialType::SteamSessionTicket:
+			EOSType = EOS_EExternalCredentialType::EOS_ECT_STEAM_SESSION_TICKET;
+			break;
+		case EExternalCredentialType::SteamAppTicket:
+			EOSType = EOS_EExternalCredentialType::EOS_ECT_STEAM_APP_TICKET;
+			break;
+		default:
+			EOSType = EOS_EExternalCredentialType::EOS_ECT_EPIC;
+			break;
+		}
+
+		UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Connect login with external credential (%s) for '%s'"),
+		       LexToString(CredentialType), *InDisplayName);
+
+		ConnectLoginWithToken(Token, (int32)EOSType, InDisplayName, MoveTemp(Callback));
+	}
+
+	void FEOSPlatformCore::ConnectLoginWithToken(const FString& Token, int32 CredentialType,
+	                                             const FString& InDisplayName,
+	                                             TFunction<void(const FGamingServiceResult&)> Callback)
+	{
+		checkf(Impl->ConnectHandle, TEXT("EOSGamingService: ConnectLoginWithToken called before the platform was created"));
+
+		// Must outlive the EOS_Connect_Login call below; assigning TCHAR_TO_UTF8() directly to the option
+		// structs leaves dangling pointers.
+		const std::string TokenUtf8 = TCHAR_TO_UTF8(*Token);
+
 		EOS_Connect_Credentials ConnectCreds = {};
 		ConnectCreds.ApiVersion = EOS_CONNECT_CREDENTIALS_API_LATEST;
-		ConnectCreds.Token = AuthToken->AccessToken;
-		ConnectCreds.Type = EOS_EExternalCredentialType::EOS_ECT_EPIC;
+		ConnectCreds.Token = TokenUtf8.c_str();
+		ConnectCreds.Type = static_cast<EOS_EExternalCredentialType>(CredentialType);
 
 		EOS_Connect_LoginOptions ConnLoginOpts = {};
 		ConnLoginOpts.ApiVersion = EOS_CONNECT_LOGIN_API_LATEST;
 		ConnLoginOpts.Credentials = &ConnectCreds;
+		// Deliberately null, even for external credentials that carry a display name.
+		//
+		// EOS_Connect_UserLoginInfo is only REQUIRED for credential types EOS cannot derive a name from
+		// (Nintendo NSA, Apple, Google, ...). For Steam it is redundant — the backend reads the persona
+		// from Steam itself, which is what FEOSUser::ResolveDisplayName already reads back out of
+		// EOS_Connect_ExternalAccountInfo. Sending it anyway fails the whole login with
+		// EOS_InvalidParameters(10) on this SDK, because the vendored binary is older than these headers
+		// and rejects EOS_CONNECT_USERLOGININFO_API_LATEST (2) — the same skew that forces
+		// EOS_Platform_Options to be pinned to 13 above.
 		ConnLoginOpts.UserLoginInfo = nullptr;
+
+		// The name still has to reach this core: the Epic-only QueryDisplayName path needs an
+		// EpicAccountId, which an externally-authenticated user does not have, so without this a
+		// Steam-signed-in player would have an empty GetDisplayName().
+		if (!InDisplayName.IsEmpty())
+		{
+			DisplayName = InDisplayName;
+		}
 
 		auto* Ctx = new FCoreLoginCtx{};
 		Ctx->Service = this;
@@ -417,7 +596,42 @@ namespace GamingServices
 					return;
 				}
 
-				UE_LOG(LogTemp, Error, TEXT("EOSGamingService: Connect login failed: %d"), (int32)Data->ResultCode);
+				// The external-credential failures all look like opaque numbers in a log but each points
+				// at a specific, actionable setup mistake, so spell them out.
+				const TCHAR* Hint = nullptr;
+				switch (Data->ResultCode)
+				{
+				case EOS_EResult::EOS_Connect_ExternalServiceConfigurationFailure:
+					Hint = TEXT("the identity provider for this credential is not configured on the product in the "
+						"EOS Dev Portal, or is not attached to the client policy this ClientId uses. For Steam it "
+						"needs the Steam App ID plus a publisher Web API key that owns that App ID, and its "
+						"application identifier must match the one the client passes to GetAuthTicketForWebApi.");
+					break;
+				case EOS_EResult::EOS_Connect_ExternalTokenValidationFailed:
+					Hint = TEXT("the platform rejected the token. Usually the App ID the ticket was minted for "
+						"differs from the one registered with the identity provider.");
+					break;
+				case EOS_EResult::EOS_Connect_UnsupportedTokenType:
+					Hint = TEXT("this credential type is not enabled for the product.");
+					break;
+				case EOS_EResult::EOS_Connect_AuthExpired:
+				case EOS_EResult::EOS_Connect_InvalidToken:
+					Hint = TEXT("the token was stale or malformed. Tickets are single-use and short-lived — mint a "
+						"fresh one per login attempt.");
+					break;
+				default:
+					break;
+				}
+
+				if (Hint)
+				{
+					UE_LOG(LogTemp, Error, TEXT("EOSGamingService: Connect login failed: %d — %s"),
+					       (int32)Data->ResultCode, Hint);
+				}
+				else
+				{
+					UE_LOG(LogTemp, Error, TEXT("EOSGamingService: Connect login failed: %d"), (int32)Data->ResultCode);
+				}
 				FCoreLoginCtx::Complete(LocalCtx, FGamingServiceResult(false));
 			}
 		);
@@ -482,27 +696,33 @@ namespace GamingServices
 		UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Authentication successful, resolving display name..."));
 		QueryDisplayName([this, AuthCtx]()
 		{
+			// The user is authenticated by this point — everything below is catalogue prefetching, and a
+			// product that simply has no achievements or leaderboards configured (EOS answers NotFound)
+			// is a normal state, not a failed sign-in. Failing the login here would report a signed-in
+			// player as signed-out, which then strands anything gated on login state.
 			UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Loading definitions..."));
-			LoadAchievementDefinitions([this, AuthCtx](const bool& bSuccess)
+			LoadAchievementDefinitions([this, AuthCtx](const bool& bAchievementsLoaded)
 			{
-				if (!bSuccess)
+				if (!bAchievementsLoaded)
 				{
-					UE_LOG(LogTemp, Error, TEXT("EOSGamingService: Achievement definition loading failed"));
-					FCoreLoginCtx::Complete(AuthCtx, FGamingServiceResult(false));
-					return;
+					UE_LOG(LogTemp, Warning,
+					       TEXT("EOSGamingService: No achievement definitions available; continuing without them"));
 				}
 
-				LoadLeaderboardDefinitions([this, AuthCtx](const bool& bSuccess)
+				LoadLeaderboardDefinitions([this, AuthCtx](const bool& bLeaderboardsLoaded)
 				{
-					if (!bSuccess)
+					if (!bLeaderboardsLoaded)
 					{
-						UE_LOG(LogTemp, Error, TEXT("EOSGamingService: Leaderboard definition loading failed"));
-						FCoreLoginCtx::Complete(AuthCtx, FGamingServiceResult(false));
-						return;
+						UE_LOG(LogTemp, Warning,
+						       TEXT("EOSGamingService: No leaderboard definitions available; continuing without them"));
 					}
 
+					// Marks the load PHASE as finished, not that anything was found — an empty catalogue is
+					// valid. Capability calls gate on this and then handle a missing definition themselves
+					// (see FEOSLeaderboards::WriteLeaderboardScore), so leaving it false would assert
+					// instead of degrading.
 					bDefinitionsLoaded = true;
-					UE_LOG(LogTemp, Log, TEXT("EOSGamingService: All definitions loaded, starting cloud sync..."));
+					UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Definition load complete, starting cloud sync..."));
 
 					if (!SyncFromCloudHook)
 					{
@@ -768,6 +988,10 @@ namespace GamingServices
 		Impl->EcomHandle = EOS_Platform_GetEcomInterface(Impl->PlatformHandle);
 		Impl->UserInfoHandle = EOS_Platform_GetUserInfoInterface(Impl->PlatformHandle);
 		Impl->P2PHandle = EOS_Platform_GetP2PInterface(Impl->PlatformHandle);
+		// Friends and Presence are Epic Account Services: the handles exist regardless, but every call
+		// through them needs an EpicAccountId, so they stay unusable for a Connect-only sign-in.
+		Impl->FriendsHandle = EOS_Platform_GetFriendsInterface(Impl->PlatformHandle);
+		Impl->PresenceHandle = EOS_Platform_GetPresenceInterface(Impl->PlatformHandle);
 
 		UE_LOG(LogTemp, Log, TEXT("EOSGamingService: EOS platform created successfully"));
 		return true;
@@ -799,6 +1023,32 @@ namespace GamingServices
 			EOS_Platform_Release(Impl->PlatformHandle);
 			Impl->PlatformHandle = nullptr;
 		}
+
+		// The interface handles and ids above are owned by the platform, so releasing it invalidates every
+		// one of them without touching our copies. Capabilities outlive this call - FEOSGamingService holds
+		// them and its destructor runs later - and they all gate their teardown on "is my handle non-null",
+		// so a stale pointer here reads as "still usable" and sends them into a freed platform. That is an
+		// access violation inside the SDK during shutdown, not a leak: null them so those guards work.
+		Impl->AuthHandle = nullptr;
+		Impl->AchievementsHandle = nullptr;
+		Impl->LeaderboardsHandle = nullptr;
+		Impl->StatsHandle = nullptr;
+		Impl->ConnectHandle = nullptr;
+		Impl->PlayerDataStorageHandle = nullptr;
+		Impl->LobbyHandle = nullptr;
+		Impl->EcomHandle = nullptr;
+		Impl->UserInfoHandle = nullptr;
+		Impl->P2PHandle = nullptr;
+		Impl->FriendsHandle = nullptr;
+		Impl->PresenceHandle = nullptr;
+		Impl->EpicAccountIdCached = nullptr;
+		Impl->ProductUserId = nullptr;
+
+		// Same reasoning for the flag: IsInitialized() is what IsAvailable() and the capability guards ask,
+		// and leaving it true after teardown claims a platform that no longer exists.
+		bIsInitialized = false;
+		bIsConnected = false;
+		bIsLoggedIn = false;
 
 		if (bEOSSDKInitialized)
 		{
@@ -936,4 +1186,4 @@ namespace GamingServices
 	}
 }
 
-#endif // USE_EOS
+#endif // GS_WITH_EOS

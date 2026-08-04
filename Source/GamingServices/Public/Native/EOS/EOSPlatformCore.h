@@ -1,11 +1,12 @@
 #pragma once
 
-#if defined(USE_EOS)
+#if defined(GS_WITH_EOS)
 
 #include "CoreMinimal.h"
 #include "DataTypes/ConnectTypes.h"
 #include "DataTypes/GamingServiceResult.h"
 #include "DataTypes/LoginTypes.h"
+#include "Native/Interfaces/IExternalAuthService.h"
 #include "Templates/PimplPtr.h"
 
 namespace GamingServices
@@ -37,8 +38,27 @@ namespace GamingServices
 		void DestroyPlatform();
 		void Tick();
 
-		// Login / identity (Auth + Connect flow).
+		// Login / identity (Auth + Connect flow) against an Epic account.
 		void Login(const FGamingServiceLoginParams& Params, TFunction<void(const FGamingServiceResult&)> Callback);
+
+		/**
+		 * Login using a credential minted by a different platform (e.g. a Steam session ticket), going
+		 * straight to EOS Connect and skipping the Epic Auth interface entirely.
+		 *
+		 * There is no EpicAccountId in this flow — the ProductUserId is the identity, which is all the
+		 * feature services (lobbies, P2P, stats, achievements, player data storage) key on. The account
+		 * is created on first sight. DisplayName is passed through as non-authoritative user info so the
+		 * originating platform's name still shows up on leaderboards and in lobbies.
+		 *
+		 * On success the core is logged in exactly as it would be after Login(), so every EOS capability
+		 * behaves identically regardless of which platform did the authenticating.
+		 */
+		void LoginWithExternalCredential(EExternalCredentialType CredentialType, const FString& Token,
+		                                 const FString& InDisplayName,
+		                                 TFunction<void(const FGamingServiceResult&)> Callback);
+
+		/** Whether this core can consume the given credential format. */
+		static bool SupportsExternalCredential(EExternalCredentialType CredentialType);
 
 		bool IsInitialized() const { return bIsInitialized; }
 		bool IsConnected() const { return bIsConnected; }
@@ -59,6 +79,8 @@ namespace GamingServices
 		void* GetConnectHandle() const;
 		void* GetUserInfoHandle() const;
 		void* GetP2PHandle() const;
+		void* GetFriendsHandle() const;
+		void* GetPresenceHandle() const;
 
 		void* GetEpicAccountId() const;
 		void* GetProductUserId() const;
@@ -107,6 +129,11 @@ namespace GamingServices
 		// private login context (FEOSCorePlatformLoginCtx), forward-declared and only used in the .cpp.
 		void AuthLogin(const FGamingServiceLoginParams& Params, TFunction<void(const FGamingServiceResult&)> Callback);
 		void ConnectLogin(void* EpicAccountId, TFunction<void(const FGamingServiceResult&)> Callback);
+
+		// Shared tail of every Connect login, whoever supplied the credential. CredentialType is an
+		// EOS_EExternalCredentialType passed as int32 so this header stays SDK-free.
+		void ConnectLoginWithToken(const FString& Token, int32 CredentialType, const FString& InDisplayName,
+		                           TFunction<void(const FGamingServiceResult&)> Callback);
 		void CreateUser(struct FEOSCorePlatformLoginCtx* Ctx, void* ContinuanceToken) const;
 		void CompleteAuthentication(void* InProductUserId, struct FEOSCorePlatformLoginCtx* AuthCtx);
 
@@ -131,4 +158,4 @@ namespace GamingServices
 	};
 }
 
-#endif // USE_EOS
+#endif // GS_WITH_EOS

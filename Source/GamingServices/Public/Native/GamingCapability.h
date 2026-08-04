@@ -17,7 +17,8 @@ enum class EGamingCapability : uint8
 	CloudStorage,
 	RemoteSettings,
 	Matchmaking,
-	User
+	User,
+	Friends
 };
 
 /**
@@ -56,11 +57,14 @@ struct GAMINGSERVICES_API FGamingServiceCapabilities
 	UPROPERTY(BlueprintReadOnly, Category = "GamingServices|Capabilities")
 	bool bUser = false;
 
+	UPROPERTY(BlueprintReadOnly, Category = "GamingServices|Capabilities")
+	bool bFriends = false;
+
 	/** Returns whether the backend supports at least one capability (i.e. it is a real platform). */
 	bool HasAny() const
 	{
 		return bAchievements || bEntitlements || bLeaderboards || bStats
-			|| bCloudStorage || bRemoteSettings || bMatchmaking || bUser;
+			|| bCloudStorage || bRemoteSettings || bMatchmaking || bUser || bFriends;
 	}
 
 	/** Returns whether the given capability flag is set. */
@@ -76,6 +80,7 @@ struct GAMINGSERVICES_API FGamingServiceCapabilities
 		case EGamingCapability::RemoteSettings: return bRemoteSettings;
 		case EGamingCapability::Matchmaking:    return bMatchmaking;
 		case EGamingCapability::User:           return bUser;
+		case EGamingCapability::Friends:        return bFriends;
 		default:                                return false;
 		}
 	}

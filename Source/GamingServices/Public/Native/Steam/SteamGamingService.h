@@ -15,6 +15,9 @@ namespace GamingServices
 	class FSteamCloudStorage;
 	class FSteamMatchmaking;
 	class FSteamUser;
+	class FSteamExternalAuth;
+	class FSteamInviteTransport;
+	class FSteamFriends;
 
 	/**
 	 * Steamworks backend. Owns the shared FSteamPlatformCore plus one instance per capability,
@@ -43,10 +46,21 @@ namespace GamingServices
 		virtual IRemoteSettingsService* GetRemoteSettings() const override;
 		virtual IMatchmakingService*    GetMatchmaking()    const override;
 		virtual IUserService*           GetUser()           const override;
+		virtual IFriendsService*        GetFriends()        const override;
 		virtual IP2PTransport*          GetP2PTransport()   override;
+
+		virtual EGamingBackend GetBackend() const override { return EGamingBackend::Steamworks; }
+
+		/** Steam can vouch for the local user to another backend (EOS Connect takes its session ticket). */
+		virtual IExternalAuthProvider* GetExternalAuthProvider() const override;
+
+		/** Steam's friends list and overlay can carry another backend's session id as an invite. */
+		virtual IInviteTransport* GetInviteTransport() const override;
 
 	private:
 		TUniquePtr<FSteamPlatformCore> Core;
+		TUniquePtr<FSteamExternalAuth> ExternalAuth;
+		TUniquePtr<FSteamInviteTransport> InviteTransport;
 		TUniquePtr<IP2PTransport> P2PTransport;
 		TUniquePtr<FSteamAchievements> Achievements;
 		TUniquePtr<FSteamEntitlements> Entitlements;
@@ -58,5 +72,8 @@ namespace GamingServices
 		TUniquePtr<FSteamUser> User;
 		TUniquePtr<FSteamMatchmaking> Matchmaking;
 		TUniquePtr<FRemoteSettingsStore> RemoteSettings;
+		// Declared last on purpose: Friends holds a FSteamInviteTransport& (it invites to whatever session
+		// the transport has published), and members destroy in reverse declaration order.
+		TUniquePtr<FSteamFriends> Friends;
 	};
 }

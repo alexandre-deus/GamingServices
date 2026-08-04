@@ -2,9 +2,13 @@
 
 #include "CoreMinimal.h"
 #include "DataTypes/ConnectTypes.h"
+#include "Native/GamingBackend.h"
 #include "Native/GamingCapability.h"
 
 class IAchievementsService;
+class IExternalAuthProvider;
+class IExternalAuthConsumer;
+class IInviteTransport;
 class IEntitlementsService;
 class ILeaderboardsService;
 class IStatsService;
@@ -12,6 +16,7 @@ class ICloudStorageService;
 class IRemoteSettingsService;
 class IMatchmakingService;
 class IUserService;
+class IFriendsService;
 class IP2PTransport;
 
 /**
@@ -53,11 +58,36 @@ public:
 	virtual IUserService*           GetUser()           const { return nullptr; }
 
 	/**
+	 * The local user's social graph, or null where it is unreadable. Notably null on EOS for a user who
+	 * signed in through Connect only: the Friends interface is Epic Account Services and needs an
+	 * EpicAccountId, which an externally-authenticated user does not have.
+	 */
+	virtual IFriendsService*        GetFriends()        const { return nullptr; }
+
+	/**
 	 * P2P networking transport for this backend (Steam / EOS), or null when unsupported or not ready
 	 * (e.g. before login). Created lazily once the platform can address peers. SDK-free interface, so
 	 * this stays out of the platform SDKs; the netdriver and tests drive it directly.
 	 */
 	virtual IP2PTransport* GetP2PTransport() { return nullptr; }
+
+	/** Which platform this service speaks to. A composite reports its primary backend. */
+	virtual EGamingBackend GetBackend() const { return EGamingBackend::None; }
+
+	/**
+	 * Cross-backend authentication. A backend that can vouch for the local user to another one returns
+	 * a provider (Steam); a backend that can be logged into with someone else's credential returns a
+	 * consumer (EOS). The composite service pairs them so a Steam sign-in yields an EOS session.
+	 */
+	virtual IExternalAuthProvider* GetExternalAuthProvider() const { return nullptr; }
+	virtual IExternalAuthConsumer* GetExternalAuthConsumer() const { return nullptr; }
+
+	/**
+	 * This platform's invite system, when it can carry a session id belonging to another backend.
+	 * Null on backends with no such channel. The composite pairs it with the primary's matchmaking so
+	 * friends on the identity platform can be invited into a session the primary owns.
+	 */
+	virtual IInviteTransport* GetInviteTransport() const { return nullptr; }
 
 	/** Flat capability snapshot, derived from the accessors above (single source of truth). */
 	FGamingServiceCapabilities GetCapabilities() const
@@ -71,6 +101,7 @@ public:
 		Caps.bRemoteSettings = GetRemoteSettings() != nullptr;
 		Caps.bMatchmaking    = GetMatchmaking()    != nullptr;
 		Caps.bUser           = GetUser()           != nullptr;
+		Caps.bFriends        = GetFriends()        != nullptr;
 		return Caps;
 	}
 };

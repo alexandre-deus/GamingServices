@@ -1,4 +1,4 @@
-#ifdef USE_STEAMWORKS
+#ifdef GS_WITH_STEAM
 
 #include "Native/Steam/Interfaces/SteamMatchmaking.h"
 #include "Native/Steam/Interfaces/SteamUser.h"
@@ -79,7 +79,6 @@ namespace GamingServices
 		CSteamID PendingCommandLineLobbyId;
 		bool bCheckedCommandLine = false;
 		bool bCommandLineJoinDelivered = false;
-		bool bLoggedPendingWait = false;
 
 		// ---- Lobby search machinery ----
 		struct FLobbySearchContext
@@ -323,9 +322,12 @@ namespace GamingServices
 		 * Cold-start counterpart to OnGameLobbyJoinRequested: drives the "+connect_lobby" launch
 		 * argument through the same OnLobbyInviteAccepted sink the in-game overlay path uses.
 		 *
-		 * The command line is parsed exactly once. Delivery is deferred until a listener is bound,
-		 * because the matchmaking service ticks from the first frame while the application layer
-		 * subscribes later — firing eagerly would drop the join. There is no inviter identity on a
+		 * Driven by QueryPendingInvites, not by Tick. It used to run every frame purely to discover when
+		 * the application layer had finally bound its sink — the service ticks from the first frame, the
+		 * game subscribes later, and firing eagerly would drop the join. An explicit "recover anything
+		 * that was waiting" call is that signal, so the polling is gone.
+		 *
+		 * The command line is parsed once and the join delivered once. There is no inviter identity on a
 		 * cold start, so those fields are left empty.
 		 */
 		void DeliverPendingCommandLineJoin()
@@ -342,25 +344,21 @@ namespace GamingServices
 				if (LobbyId != 0)
 				{
 					PendingCommandLineLobbyId = CSteamID(LobbyId);
-					UE_LOG(LogTemp, Log, TEXT("SteamworksGamingService: [cmdline-join] pending cold-start join queued for lobby %llu"), LobbyId);
+					UE_LOG(LogTemp, Log, TEXT("SteamworksGamingService: [cmdline-join] cold-start join queued for lobby %llu"), LobbyId);
 				}
 			}
 
 			if (!PendingCommandLineLobbyId.IsValid())
 			{
-				// No cold-start lobby to join; stop re-checking every tick.
 				bCommandLineJoinDelivered = true;
 				return;
 			}
 
-			// Wait for the owner to wire up its sink so the join isn't dropped.
+			// Deliberately does NOT latch as delivered: the caller asked too early, and a later call should
+			// still find the join rather than having silently consumed it.
 			if (!Owner.OnLobbyInviteAccepted)
 			{
-				if (!bLoggedPendingWait)
-				{
-					bLoggedPendingWait = true;
-					UE_LOG(LogTemp, Log, TEXT("SteamworksGamingService: [cmdline-join] lobby %llu pending — waiting for a listener to bind OnLobbyInviteAccepted"), PendingCommandLineLobbyId.ConvertToUint64());
-				}
+				UE_LOG(LogTemp, Warning, TEXT("SteamworksGamingService: [cmdline-join] lobby %llu still pending — nothing is bound to OnLobbyInviteAccepted yet"), PendingCommandLineLobbyId.ConvertToUint64());
 				return;
 			}
 
@@ -385,7 +383,6 @@ namespace GamingServices
 	void FSteamMatchmaking::Tick()
 	{
 		Impl->ProcessLobbySearchContexts();
-		Impl->DeliverPendingCommandLineJoin();
 	}
 
 	FString FSteamMatchmaking::GetSessionConnectionString() const
@@ -855,6 +852,39 @@ namespace GamingServices
 		}
 	}
 
+	bool FSteamMatchmaking::PlatformOwnsInviteUI() const
+	{
+		return true;
+	}
+
+	void FSteamMatchmaking::RejectInvite(const FString& InviteId,
+	                                     TFunction<void(const FGamingServiceResult&)> Callback)
+	{
+		UE_LOG(LogTemp, Log,
+		       TEXT("SteamworksGamingService: invites are accepted or dismissed in the Steam overlay - "
+		            "nothing to reject in-game"));
+
+		if (Callback)
+		{
+			Callback(FGamingServiceResult(false));
+		}
+	}
+
+	void FSteamMatchmaking::QueryPendingInvites(TFunction<void(const FPendingInvitesResult&)> Callback)
+	{
+		// A "+connect_lobby" cold start is an invite the player ALREADY accepted - accepting is what
+		// launched the game - so it leaves through OnLobbyInviteAccepted and never appears in the list
+		// below. This call is simply the point at which the game says it is ready to be handed one.
+		Impl->DeliverPendingCommandLineJoin();
+
+		// Not a gap to fill later: Steam has no API to enumerate UNANSWERED invites, because it never hands
+		// the game one. The overlay holds those until the player acts.
+		if (Callback)
+		{
+			Callback(FPendingInvitesResult(false));
+		}
+	}
+
 	void FSteamMatchmaking::ShowInviteFriendsDialog(TFunction<void(const FGamingServiceResult&)> Callback)
 	{
 		ISteamFriends* SteamFriends = ::SteamFriends();
@@ -884,4 +914,4 @@ namespace GamingServices
 	}
 }
 
-#endif // USE_STEAMWORKS
+#endif // GS_WITH_STEAM

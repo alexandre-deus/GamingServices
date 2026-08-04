@@ -42,9 +42,49 @@ public:
 
 	virtual FString GetSessionConnectionString() const = 0;
 
+	/**
+	 * Whether the platform presents its own accept / decline UI for incoming invites.
+	 *
+	 * True means the player decides inside an overlay the game does not draw and cannot intercept: only
+	 * OnLobbyInviteAccepted will ever fire, OnLobbyInviteReceived stays silent, and drawing an in-game
+	 * toast would duplicate UI the player is already looking at. False means nothing will show an invite
+	 * unless the game does.
+	 *
+	 * Runtime state, not a compile-time property: a build that normally defers to an overlay still has to
+	 * draw its own UI when that platform turns out to be unavailable.
+	 */
+	virtual bool PlatformOwnsInviteUI() const = 0;
+
+	/**
+	 * Turn down an invite that was delivered through OnLobbyInviteReceived, so it stops being pending and
+	 * the sender is told. Backends whose invites are owned by a platform overlay have nothing to reject —
+	 * the overlay already consumed the decision — and report failure.
+	 */
+	virtual void RejectInvite(const FString& InviteId,
+	                          TFunction<void(const FGamingServiceResult&)> Callback) = 0;
+
+	/**
+	 * Ask the backend which invites are already waiting, rather than waiting to be told about new ones.
+	 *
+	 * OnLobbyInviteReceived only covers invites that arrive while the game is running and listening, so
+	 * anything sent before launch, or during sign-in, is invisible to it. Poll after login to pick those
+	 * up. Backends where an overlay owns invites report failure with an empty list: the invites exist, but
+	 * they belong to a UI this game does not drive.
+	 */
+	virtual void QueryPendingInvites(TFunction<void(const FPendingInvitesResult&)> Callback) = 0;
+
 	// Notification sinks (set by owner, fired by backend).
 	TFunction<void(const FSessionMemberInfo&)> OnSessionUserJoined;
 	TFunction<void(const FSessionMemberInfo&)> OnSessionUserLeft;
 	TFunction<void(const FGamingServiceResult&)> OnSessionEnded;
 	TFunction<void(const FLobbyInviteAcceptedInfo&)> OnLobbyInviteAccepted;
+
+	/**
+	 * An invite arrived and nobody has decided about it yet — the game owns the accept / decline UI.
+	 *
+	 * Only fires on backends that surface invites before acceptance. Where a platform overlay owns that
+	 * step (Steam), this stays silent and OnLobbyInviteAccepted is the only thing that ever fires, so a
+	 * listener must not treat "never called" as an error.
+	 */
+	TFunction<void(const FLobbyInviteReceivedInfo&)> OnLobbyInviteReceived;
 };

@@ -3,7 +3,7 @@
 #include "CoreMinimal.h"
 #include "Native/IGamingService.h"
 
-#if defined(USE_EOS)
+#if defined(GS_WITH_EOS)
 
 #include "Native/RemoteSettingsStore.h"
 
@@ -17,6 +17,8 @@ namespace GamingServices
 	class FEOSCloudStorage;
 	class FEOSMatchmaking;
 	class FEOSUser;
+	class FEOSExternalAuth;
+	class FEOSFriends;
 
 	/**
 	 * EOS (Epic Online Services) backend.
@@ -52,8 +54,22 @@ namespace GamingServices
 		virtual IUserService*           GetUser()           const override;
 		virtual IP2PTransport*          GetP2PTransport()   override;
 
+		/**
+		 * Null until the local user has an EpicAccountId. Friends and Presence are Epic Account Services,
+		 * so a Connect-only sign-in (Steam authenticating into EOS) genuinely has no social graph here —
+		 * reporting the capability as absent is the honest answer, and it makes the composite fall through
+		 * to the identity backend's friend list instead.
+		 */
+		virtual IFriendsService*        GetFriends()        const override;
+
+		virtual EGamingBackend GetBackend() const override { return EGamingBackend::EpicOnlineServices; }
+
+		/** EOS can be signed into with another platform's credential (Connect takes a Steam session ticket). */
+		virtual IExternalAuthConsumer* GetExternalAuthConsumer() const override;
+
 	private:
 		TUniquePtr<FEOSPlatformCore> Core;
+		TUniquePtr<FEOSExternalAuth> ExternalAuth;
 		TUniquePtr<IP2PTransport> P2PTransport;
 		TUniquePtr<FEOSAchievements> Achievements;
 		TUniquePtr<FEOSEntitlements> Entitlements;
@@ -63,7 +79,10 @@ namespace GamingServices
 		TUniquePtr<FEOSMatchmaking> Matchmaking;
 		TUniquePtr<FEOSUser> User;
 		TUniquePtr<FRemoteSettingsStore> RemoteSettings;
+		// Declared last on purpose: Friends holds an IMatchmakingService& (it invites to the current
+		// lobby), and members destroy in reverse declaration order.
+		TUniquePtr<FEOSFriends> Friends;
 	};
 }
 
-#endif // USE_EOS
+#endif // GS_WITH_EOS

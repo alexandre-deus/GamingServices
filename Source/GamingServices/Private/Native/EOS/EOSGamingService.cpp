@@ -1,4 +1,4 @@
-#if defined(USE_EOS)
+#if defined(GS_WITH_EOS)
 
 #include "Native/EOS/EOSGamingService.h"
 #include "Native/EOS/EOSPlatformCore.h"
@@ -10,6 +10,8 @@
 #include "Native/EOS/Interfaces/EOSMatchmaking.h"
 #include "Native/EOS/Interfaces/EOSUser.h"
 #include "Native/EOS/Interfaces/EOSP2PTransport.h"
+#include "Native/EOS/Interfaces/EOSExternalAuth.h"
+#include "Native/EOS/Interfaces/EOSFriends.h"
 
 namespace GamingServices
 {
@@ -26,7 +28,9 @@ namespace GamingServices
 		CloudStorage = MakeUnique<FEOSCloudStorage>(*Core);
 		Matchmaking = MakeUnique<FEOSMatchmaking>(*Core);
 		User = MakeUnique<FEOSUser>(*Core);
+		Friends = MakeUnique<FEOSFriends>(*Core, *Matchmaking);
 		RemoteSettings = MakeUnique<FRemoteSettingsStore>(*CloudStorage);
+		ExternalAuth = MakeUnique<FEOSExternalAuth>(*Core);
 	}
 
 	FEOSGamingService::~FEOSGamingService() = default;
@@ -63,6 +67,15 @@ namespace GamingServices
 	IMatchmakingService*    FEOSGamingService::GetMatchmaking()    const { return Matchmaking.Get(); }
 	IUserService*           FEOSGamingService::GetUser()           const { return User.Get(); }
 
+	IFriendsService* FEOSGamingService::GetFriends() const
+	{
+		// Gated on IsAvailable rather than mere existence, so the capability only appears once there is an
+		// EpicAccountId behind it. Before login, and for a Connect-only user, this stays null.
+		return (Friends && Friends->IsAvailable()) ? Friends.Get() : nullptr;
+	}
+
+	IExternalAuthConsumer* FEOSGamingService::GetExternalAuthConsumer() const { return ExternalAuth.Get(); }
+
 	IP2PTransport* FEOSGamingService::GetP2PTransport()
 	{
 		// Lazily created once we can address peers: needs the P2P interface handle and the local
@@ -80,4 +93,4 @@ namespace GamingServices
 	}
 }
 
-#endif // USE_EOS
+#endif // GS_WITH_EOS

@@ -1,6 +1,6 @@
 #pragma once
 
-#ifdef USE_STEAMWORKS
+#ifdef GS_WITH_STEAM
 
 #include "CoreMinimal.h"
 #include "HAL/CriticalSection.h"
@@ -60,4 +60,4 @@ namespace GamingServices
 	};
 }
 
-#endif // USE_STEAMWORKS
+#endif // GS_WITH_STEAM

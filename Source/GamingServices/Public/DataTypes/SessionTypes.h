@@ -4,7 +4,40 @@
 #include "DataTypes/GamingServiceResult.h"
 #include "SessionTypes.generated.h"
 
-class ISessionJoinHandle{};
+/**
+ * Opaque backend payload identifying a joinable session.
+ *
+ * Usually this wraps a live backend object obtained from a search or an invite. It can also carry
+ * nothing but a lobby id — see FLobbyIdJoinHandle — which is what happens when the invite arrived
+ * over a different platform than the one running the session.
+ */
+class ISessionJoinHandle
+{
+public:
+	virtual ~ISessionJoinHandle() = default;
+
+	/** Whether this handle owns a live backend object, as opposed to only naming the lobby. */
+	virtual bool HasBackendDetails() const { return false; }
+
+	/** Backend lobby id, when known. */
+	virtual FString GetLobbyId() const { return FString(); }
+};
+
+/**
+ * A join handle that is nothing more than a lobby id.
+ *
+ * Produced when the id reached us as text rather than as a backend object: a shared join code, or an
+ * invite delivered through another platform's invite system (Steam carrying an EOS lobby id). The
+ * backend resolves it by id at join time instead of joining through a details handle.
+ */
+struct GAMINGSERVICES_API FLobbyIdJoinHandle : public ISessionJoinHandle
+{
+	FString LobbyId;
+
+	explicit FLobbyIdJoinHandle(const FString& InLobbyId) : LobbyId(InLobbyId) {}
+
+	virtual FString GetLobbyId() const override { return LobbyId; }
+};
 
 USTRUCT(BlueprintType)
 struct FSessionJoinHandle
@@ -209,4 +242,62 @@ struct GAMINGSERVICES_API FLobbyInviteAcceptedInfo
 	FSessionJoinHandle JoinHandle;
 
 	FLobbyInviteAcceptedInfo() = default;
+};
+
+/**
+ * An invite that has arrived but has NOT been acted on yet.
+ *
+ * The counterpart to FLobbyInviteAcceptedInfo, which only ever describes an invite the player already
+ * accepted somewhere else — a platform overlay. Backends without an overlay have to show the accept /
+ * decline UI themselves, and that UI needs the invite before a decision exists.
+ *
+ * InviteId is the part FLobbyInviteAcceptedInfo has no reason to carry: it is what identifies the invite
+ * back to the backend when declining, since a decline never produces a session to name instead.
+ */
+USTRUCT(BlueprintType)
+struct GAMINGSERVICES_API FLobbyInviteReceivedInfo
+{
+	GENERATED_BODY()
+
+	/** Backend id for this specific invite. Required to reject it. */
+	UPROPERTY(BlueprintReadOnly)
+	FString InviteId;
+
+	UPROPERTY(BlueprintReadOnly)
+	FString InviterUserId;
+
+	UPROPERTY(BlueprintReadOnly)
+	FString InviterDisplayName;
+
+	/**
+	 * Ready to hand to JoinSession if the player accepts. Resolved up front because the backend can stop
+	 * being able to resolve the invite id later, and because it keeps the accept path identical to the
+	 * overlay one.
+	 */
+	UPROPERTY(BlueprintReadOnly)
+	FSessionJoinHandle JoinHandle;
+
+	FLobbyInviteReceivedInfo() = default;
+};
+
+/**
+ * Every invite currently waiting on the local user.
+ *
+ * The notification sink only reports invites that arrive while the game is listening, so an invite sent
+ * before launch — or while the platform layer was still signing in — is never announced. Polling is how
+ * those are recovered; it is not a substitute for the sink, it covers the window the sink cannot.
+ */
+USTRUCT(BlueprintType)
+struct GAMINGSERVICES_API FPendingInvitesResult : public FGamingServiceResult
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly)
+	TArray<FLobbyInviteReceivedInfo> Invites;
+
+	FPendingInvitesResult() = default;
+
+	explicit FPendingInvitesResult(bool bInSuccess) : FGamingServiceResult(bInSuccess)
+	{
+	}
 };
