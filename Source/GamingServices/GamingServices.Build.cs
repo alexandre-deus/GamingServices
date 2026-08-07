@@ -96,8 +96,20 @@ public class GamingServices : ModuleRules
     /** Android ships a separate, self-contained SDK tree (AAR + per-ABI .so, a newer EOS version). */
     private static bool IsAndroid(ReadOnlyTargetRules Target) => Target.Platform == UnrealTargetPlatform.Android;
 
-    private string EOSRoot(ReadOnlyTargetRules Target) =>
-        Path.Combine(PluginRoot, "ThirdParty", "EOS", IsAndroid(Target) ? "SDK-Android" : "SDK");
+    /**
+     * iOS ships its own SDK download too: a single dynamic EOSSDK.framework that carries its headers
+     * inside it. Vendoring mirrors those headers out to Include/ so the tree matches every other
+     * platform's and nothing downstream has to special-case where an EOS header lives.
+     */
+    private static bool IsIOS(ReadOnlyTargetRules Target) => Target.Platform == UnrealTargetPlatform.IOS;
+
+    private string EOSRoot(ReadOnlyTargetRules Target)
+    {
+        string Variant = IsAndroid(Target) ? "SDK-Android"
+                       : IsIOS(Target)     ? "SDK-IOS"
+                                           : "SDK";
+        return Path.Combine(PluginRoot, "ThirdParty", "EOS", Variant);
+    }
 
     private bool IsEOSVendored(ReadOnlyTargetRules Target)
     {
@@ -115,6 +127,9 @@ public class GamingServices : ModuleRules
         if (Target.Platform == UnrealTargetPlatform.Linux)      return "libEOSSDK-Linux-Shipping.so";
         if (Target.Platform == UnrealTargetPlatform.LinuxArm64) return "libEOSSDK-LinuxArm64-Shipping.so";
         if (Target.Platform == UnrealTargetPlatform.Android)    return "libEOSSDK.so";
+        // Not a file that gets loaded on iOS — the framework is linked, so this only names the SDK in
+        // logs. See the iOS branch of AddEOS and FGamingSdkLibrary::Load.
+        if (Target.Platform == UnrealTargetPlatform.IOS)        return "EOSSDK.framework";
         return null;
     }
 
@@ -148,6 +163,32 @@ public class GamingServices : ModuleRules
             // (EOSSDK.init, wired in EOS_Android_UPL.xml). Nothing to stage and nothing to link — the
             // runtime loader just dlopen()s the already-packaged library by name.
             AdditionalPropertiesForReceipt.Add("AndroidPlugin", Path.Combine(PluginRoot, "EOS_Android_UPL.xml"));
+        }
+        else if (IsIOS(Target))
+        {
+            // iOS is the one platform that cannot resolve this backend the way the rest do. There is no
+            // runtime library loading (FPlatformProcess::GetDllHandle is unimplemented and fatal there),
+            // so the library cannot be staged into the common folder and dlopen'd. Embed the framework in
+            // the .app and link it instead: dyld maps it before main(), and FGamingSdkLibrary resolves the
+            // same symbol table straight out of the process image. Nothing about the call sites changes.
+            string FrameworkZip = Path.Combine(Root, "Bin", "EOSSDK.embeddedframework.zip");
+            if (!File.Exists(FrameworkZip))
+            {
+                // UBT wants the framework as a zip laid out <Name>.embeddedframework/<Name>.framework.
+                Console.WriteLine($"[GamingServices]   ERROR: EOS iOS framework missing: {FrameworkZip}");
+                return false;
+            }
+
+            PublicAdditionalFrameworks.Add(
+                new Framework("EOSSDK", FrameworkZip, Framework.FrameworkMode.LinkAndCopy));
+
+            // The account portal is presented through ASWebAuthenticationSession, which on iOS must be
+            // told which window to present over (EOSIOSAuth.mm). That needs the protocol's own framework
+            // and the engine's IOSAppDelegate, which lives in ApplicationCore.
+            PublicFrameworks.Add("AuthenticationServices");
+            PrivateDependencyModuleNames.Add("ApplicationCore");
+
+            Console.WriteLine("[GamingServices]   embedded EOSSDK.framework (linked into the app, copied into the .app bundle)");
         }
         else
         {

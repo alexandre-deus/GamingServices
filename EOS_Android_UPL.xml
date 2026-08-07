@@ -48,10 +48,16 @@
 				<insertValue value="dependencies.implementation files ('$S(AbsPluginDir)/ThirdParty/EOS/SDK-Android/Bin/Android/static-stdc++/aar/eossdk-StaticSTDC-release.aar')"/>
 				<insertNewline/>
 				<!-- The EOS SDK AAR (v1.19) uses Java 8+ library APIs that need core library desugaring on
-				     this minSdk; without it :app:checkDebugAarMetadata fails. -->
+				     this minSdk; without it :app:checkDebugAarMetadata fails.
+
+				     Keep this version in step with the engine's own app/build.gradle. UE 5.7 ships
+				     downloader_library and permission_library built against desugar_jdk_libs 2.1.5, and
+				     AAR metadata checking is a floor, not a preference: pinning anything lower here
+				     fails :app:checkDebugAarMetadata with "requires desugar_jdk_libs version to be
+				     2.1.5 or above", even though the engine's own build.gradle already asks for 2.1.5. -->
 				<insert>
 					dependencies {
-						coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.0.4'
+						coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.5'
 						implementation 'androidx.appcompat:appcompat:1.5.1'
 						implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
 						implementation 'androidx.security:security-crypto:1.0.0'

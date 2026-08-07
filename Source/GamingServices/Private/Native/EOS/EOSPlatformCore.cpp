@@ -3,6 +3,7 @@
 #include "Native/EOS/EOSPlatformCore.h"
 #include "EOSCommon.h"
 #include "EOSCallbackContext.h"
+#include "EOSIOSAuth.h"
 
 #include "HAL/PlatformFileManager.h"
 #include "Misc/Paths.h"
@@ -392,6 +393,12 @@ namespace GamingServices
 			break;
 		case EEOSLoginMethod::AccountPortal:
 			Credentials.Type = EOS_ELoginCredentialType::EOS_LCT_AccountPortal;
+#if PLATFORM_IOS
+			// Only the portal needs this: it is the one method that presents a browser, and the SDK
+			// releases the anchor it is given once consumed, so handing one to a login that never
+			// presents would strand it. See EOSIOSAuth.h for why iOS alone has to supply it.
+			Credentials.SystemAuthCredentialsOptions = GetIOSAuthCredentialsOptions();
+#endif
 			break;
 		case EEOSLoginMethod::DeviceCode:
 			Credentials.Type = EOS_ELoginCredentialType::EOS_LCT_DeviceCode;
@@ -889,16 +896,12 @@ namespace GamingServices
 		EOS_Logging_SetLogLevel(EOS_ELogCategory::EOS_LC_ALL_CATEGORIES, EOS_ELogLevel::EOS_LOG_Verbose);
 
 		EOS_Platform_Options PlatformOptions = {};
-#if PLATFORM_ANDROID
-		// Android links a newer EOS SDK (1.19, platform-options version 15) than desktop. Its binary
-		// rejects the desktop's hardcoded v13, making EOS_Platform_Create return null — so use the value
-		// the linked SDK header advertises (the struct layout is identical across v13..v15).
+		// Track whatever SDK is actually vendored rather than pinning a number: an EOS binary rejects a
+		// platform-options version it does not know, and EOS_Platform_Create then returns null. This was
+		// previously split per platform because desktop was on an older SDK (1.17, whose binary accepted
+		// only 13 even though its header already said 14) while Android was on 1.19. Desktop and iOS are
+		// now on 1.19 as well, so every platform takes the value its own linked header advertises.
 		PlatformOptions.ApiVersion = EOS_PLATFORM_OPTIONS_API_LATEST;
-#else
-		// Desktop SDK (1.17): the header's EOS_PLATFORM_OPTIONS_API_LATEST is 14, but that binary only
-		// accepts 13, so it stays hardcoded here.
-		PlatformOptions.ApiVersion = 13;
-#endif
 		std::string ProductIdUtf8 = TCHAR_TO_UTF8(*EOSOpts.ProductId);
 		std::string SandboxIdUtf8 = TCHAR_TO_UTF8(*EOSOpts.SandboxId);
 		std::string DeploymentIdUtf8 = TCHAR_TO_UTF8(*EOSOpts.DeploymentId);
@@ -960,6 +963,15 @@ namespace GamingServices
 		FString CacheDir = FPaths::Combine(FPlatformMisc::GamePersistentDownloadDir(), TEXT("EOSCache"));
 #else
 		FString CacheDir = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("EOSCache"));
+		if (FPaths::IsRelative(CacheDir))
+		{
+			// iOS resolves ProjectSavedDir() against a base that is not established yet at PostConfigInit,
+			// so ConvertRelativePathToFull hands back "../../../<Project>/Saved/EOSCache" unchanged and
+			// EOS_Platform_Create rejects it. ConvertToAbsolutePathForExternalAppForWrite maps a
+			// project-relative path onto the app's writable container as an absolute path, which is what
+			// an out-of-engine SDK needs. Left as a fallback so desktop keeps its existing path.
+			CacheDir = IFileManager::Get().ConvertToAbsolutePathForExternalAppForWrite(*CacheDir);
+		}
 #endif
 		IFileManager::Get().MakeDirectory(*CacheDir, true);
 		// Must outlive the EOS_Platform_Create call below; assigning TCHAR_TO_UTF8() directly leaves
