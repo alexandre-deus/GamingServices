@@ -86,22 +86,6 @@ namespace GamingServiceProfiles
 		.bAllowAuthFallback = true,
 	};
 
-	/**
-	 * As above, but Steam also supplies the user capability directly, so avatars come from Steam rather
-	 * than being absent (EOS has no avatar API). Kept as a separate profile because it changes which
-	 * backend answers IUserService, which is worth being explicit about.
-	 */
-	inline constexpr FGamingServiceProfile SteamAuthIntoEpicWithSteamProfiles
-	{
-		.Name = TEXT("SteamAuthIntoEpicWithSteamProfiles"),
-		.Backends = { EGamingBackend::EpicOnlineServices },
-		.AuthBackend = EGamingBackend::Steamworks,
-		.bAllowAuthFallback = true,
-		.CapabilityOverrides = {
-			{ EGamingCapability::User, EGamingBackend::Steamworks },
-		},
-	};
-
 	/** EOS where available, Steam otherwise. Two independent single-backend paths, never combined. */
 	inline constexpr FGamingServiceProfile EpicPreferredSteamFallback
 	{
