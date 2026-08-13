@@ -1,3 +1,11 @@
+EOS ships three separate downloads - desktop, Android and iOS. They are different releases of
+different shapes and are not interchangeable, so each gets its own directory here.
+
+Every tree below is a verbatim extraction of the vendor download. Nothing is copied, moved or renamed
+afterwards. The one exception is the line marked (*), which is iOS-only and must be built by hand.
+See README.md section 2.1 for the command.
+
+
 EOS (desktop: Windows / Linux / Mac) should have the tree:
 
 EOS-------SDK-------Bin
@@ -12,13 +20,31 @@ EOS (Android) is a separate, AAR-based download placed alongside the desktop SDK
 EOS-------SDK-Android-------Include
               |
               -------------Bin----Android----static-stdc++----aar    (eossdk-StaticSTDC-release.aar)
-                                                     |
-                                                     ----------libs---arm64-v8a   (libEOSSDK.so)
-                                                                 |
-                                                                 ---x86_64        (libEOSSDK.so)
+              |
+              -------------Tools                                     (dev auth tool; unused by build)
+
+Nothing is linked or staged on Android - the AAR is packaged into the APK by EOS_Android_UPL.xml and
+dlopen()'d by name at runtime.
 
 
-Steamworks should have the tree:
+EOS (iOS) is a separate, framework-based download. Note there is NO Include/ on this platform:
+
+EOS-------SDK-IOS-------Bin----EOSSDK.framework----Headers   (the iOS headers live in here)
+                          |
+                          ----EOSSDK.xcframework
+                          |
+                          ----EOSSDK.embeddedframework.zip   (*) built by hand
+
+The iOS SDK keeps its headers inside the framework. The build points the include path straight at
+Bin/EOSSDK.framework/Headers rather than copying them out to look like the other platforms, so an
+SDK upgrade is just a re-extract with nothing to fix up afterwards.
+
+(*) UBT needs the framework as a zip laid out EOSSDK.embeddedframework/EOSSDK.framework, which the
+    download does not contain - wrap and zip it yourself. The framework is repackaged, not modified.
+    Without the zip the build errors with "EOS iOS framework missing" and EOS is left out entirely.
+
+
+Steamworks (desktop only - no Android or iOS backend) should have the tree:
 
 Steamworks----sdk------public
                 |

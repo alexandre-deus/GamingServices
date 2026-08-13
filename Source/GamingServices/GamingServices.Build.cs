@@ -98,8 +98,8 @@ public class GamingServices : ModuleRules
 
     /**
      * iOS ships its own SDK download too: a single dynamic EOSSDK.framework that carries its headers
-     * inside it. Vendoring mirrors those headers out to Include/ so the tree matches every other
-     * platform's and nothing downstream has to special-case where an EOS header lives.
+     * inside it. The tree is vendored exactly as extracted — see EOSIncludeDir for where that leaves
+     * the headers, and the iOS branch of AddEOS for why the binary is linked rather than staged.
      */
     private static bool IsIOS(ReadOnlyTargetRules Target) => Target.Platform == UnrealTargetPlatform.IOS;
 
@@ -111,11 +111,28 @@ public class GamingServices : ModuleRules
         return Path.Combine(PluginRoot, "ThirdParty", "EOS", Variant);
     }
 
+    /** The vendored iOS framework, as the download lays it out. Headers included, literally. */
+    private string EOSIOSFrameworkDir(ReadOnlyTargetRules Target) =>
+        Path.Combine(EOSRoot(Target), "Bin", "EOSSDK.framework");
+
+    /**
+     * Where this platform's EOS headers live in the vendored tree.
+     *
+     * Every SDK but one puts them in a sibling Include/ folder. The iOS download carries them inside
+     * the framework instead (EOSSDK.framework/Headers), so that is what gets added to the include path
+     * — pointed at directly rather than copied out to match the others. The vendored tree is then a
+     * verbatim extraction on every platform, and an SDK upgrade is a re-extract with no fixup step
+     * that can be forgotten or done wrong. Include style is unaffected: the headers are flat and
+     * self-referential (#include "eos_sdk.h"), so only the directory differs.
+     */
+    private string EOSIncludeDir(ReadOnlyTargetRules Target) =>
+        IsIOS(Target) ? Path.Combine(EOSIOSFrameworkDir(Target), "Headers")
+                      : Path.Combine(EOSRoot(Target), "Include");
+
     private bool IsEOSVendored(ReadOnlyTargetRules Target)
     {
-        string Root = EOSRoot(Target);
-        bool bHasInclude = Directory.Exists(Path.Combine(Root, "Include"));
-        bool bHasBin = Directory.Exists(Path.Combine(Root, "Bin"));
+        bool bHasInclude = Directory.Exists(EOSIncludeDir(Target));
+        bool bHasBin = Directory.Exists(Path.Combine(EOSRoot(Target), "Bin"));
         return bHasInclude && bHasBin;
     }
 
@@ -155,7 +172,7 @@ public class GamingServices : ModuleRules
         }
 
         string Root = EOSRoot(Target);
-        PrivateIncludePaths.Add(Path.Combine(Root, "Include"));
+        PrivateIncludePaths.Add(EOSIncludeDir(Target));
 
         if (IsAndroid(Target))
         {

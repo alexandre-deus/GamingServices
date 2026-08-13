@@ -46,7 +46,7 @@ Backend availability per platform is decided by which SDK binary exists for that
 | Mac | `libEOSSDK-Mac-Shipping.dylib` | `libsteam_api.dylib` |
 | Linux / LinuxArm64 | `libEOSSDK-Linux(Arm64)-Shipping.so` | `libsteam_api.so` (Linux only) |
 | Android | `libEOSSDK.so`, from the separate Android SDK | — |
-| iOS | — | — |
+| iOS | `EOSSDK.framework`, from the separate iOS SDK | — |
 
 A platform with no backend compiled in gets the null service: the game starts, and every capability
 honestly reports unsupported.
@@ -56,6 +56,9 @@ honestly reports unsupported.
 ## 2) SDK Download and Placement
 
 Download the SDKs and place them inside the plugin `ThirdParty` directory with the following structure:
+
+EOS ships **three separate downloads** — desktop, Android and iOS — which are different releases of
+different shapes and are not interchangeable. Each gets its own directory. Steamworks is desktop-only.
 
 ```
 GamingServices/
@@ -71,15 +74,28 @@ GamingServices/
           Android/
             static-stdc++/
               aar/          # eossdk-StaticSTDC-release.aar
-              libs/
-                arm64-v8a/  # libEOSSDK.so
-                x86_64/     # libEOSSDK.so
+        Tools/              # dev auth tool etc.; unused by the build
+      SDK-IOS/              # iOS EOS SDK (separate download; framework-based)
+        Bin/
+          EOSSDK.framework/
+            Headers/        # the iOS headers live here — no sibling Include/ on this platform
+          EOSSDK.xcframework/
+          EOSSDK.embeddedframework.zip   # ⚠ not in the download — you build this, see §2.1
     Steamworks/
       sdk/
         public/
         redistributable_bin/
         win64/            # present in Steam package (contains steam_api64.dll)
 ```
+
+Every tree above is a **verbatim extraction** of the vendor download. Nothing is copied, moved or
+renamed afterwards. The single exception is the line marked ⚠: UBT needs the iOS framework repackaged
+as a zip, and no such archive ships in the download.
+
+Note that iOS has no `Include/`. Its headers ship inside the framework, and the build points the
+include path straight at `Bin/EOSSDK.framework/Headers` rather than copying them out to match the
+other platforms — so an SDK upgrade is a re-extract with no fixup step to forget. Include style is
+unchanged (`#include "eos_sdk.h"`); only the directory differs.
 
 ### 2.1) Epic Online Services (EOS)
 - Download: `https://dev.epicgames.com/docs` (navigate to Epic Online Services SDK)
@@ -91,20 +107,56 @@ GamingServices/
 > No import library is needed. The SDK is loaded and bound at runtime (see §3.7), so `Lib/` is
 > unused — only `Include/` and `Bin/` matter.
 
-For **Android**, download the separate "EOS SDK for Android" package and place it under `SDK-Android/`
+For **Android**, download the separate "EOS SDK for Android" package and extract it under `SDK-Android/`
 (it is a different, usually newer, release than the desktop SDK and is packaged as an AAR):
 - `ThirdParty/EOS/SDK-Android/Include`
 - `ThirdParty/EOS/SDK-Android/Bin/Android/static-stdc++/aar/eossdk-StaticSTDC-release.aar`
 
-The build script links one `libEOSSDK.so` per ABI, extracted from the AAR's `jni/<abi>/` into:
-- `ThirdParty/EOS/SDK-Android/Bin/Android/static-stdc++/libs/arm64-v8a/libEOSSDK.so`
-- `ThirdParty/EOS/SDK-Android/Bin/Android/static-stdc++/libs/x86_64/libEOSSDK.so`
+Nothing is linked and nothing is staged on Android. The AAR (runtime `.so` + JNI classes) is packaged
+into the APK by `EOS_Android_UPL.xml`, which also wires the SDK's Java bootstrap (`EOSSDK.init`),
+Java 8 desugaring, and the `eos.<clientid>` deep-link scheme that Account Portal / Persistent Auth
+logins redirect back through. At runtime the loader just `dlopen()`s the already-packaged library by
+name. The extracted tree is used as-is.
 
-The AAR itself (runtime `.so` + JNI classes) is packaged into the APK by `EOS_Android_UPL.xml`, which
-also wires the SDK's Java bootstrap (`EOSSDK.init`), Java 8 desugaring, and the
-`eos.<clientid>` deep-link scheme that Account Portal / Persistent Auth logins redirect back through.
-Android therefore stages nothing into the common SDK folder — gradle packages the library and the
-runtime loader `dlopen()`s it by name.
+For **iOS**, download the separate "EOS SDK for iOS" package and extract it under `SDK-IOS/`. Leave the
+extracted tree exactly as it comes — in particular there is **no `Include/` folder on this platform**.
+The iOS SDK carries its headers inside the framework, and the build reads them there:
+
+```
+ThirdParty/EOS/SDK-IOS/Bin/EOSSDK.framework/Headers/
+```
+
+`GamingServices.Build.cs` puts that directory on the include path for iOS targets (`EOSIncludeDir`)
+instead of the sibling `Include/` used everywhere else. The headers are not copied out to make the
+tree uniform: a verbatim extraction means an SDK upgrade is a re-extract with no manual fixup step
+that can be forgotten or done wrong. Nothing about include style changes — the EOS headers are flat
+and refer to each other unqualified (`#include "eos_sdk.h"`), so only the directory differs.
+
+One thing does have to be produced by hand: **build `EOSSDK.embeddedframework.zip`.** UBT's `Framework`
+helper takes a framework as a zip laid out `<Name>.embeddedframework/<Name>.framework`, and no such
+archive ships in the download. Wrap the framework in that directory and zip it:
+
+```bash
+cd ThirdParty/EOS/SDK-IOS/Bin
+mkdir -p EOSSDK.embeddedframework
+cp -R EOSSDK.framework EOSSDK.embeddedframework/
+zip -ry EOSSDK.embeddedframework.zip EOSSDK.embeddedframework
+rm -rf EOSSDK.embeddedframework      # only the zip is consumed
+```
+
+The framework itself is unmodified — it is repackaged, not rebuilt or re-signed. If the zip is absent
+the build fails the backend with
+`ERROR: EOS iOS framework missing: …` and produces a client with no EOS at all.
+
+> **Why iOS is different.** Every other platform loads its EOS binary at runtime, but
+> `FPlatformProcess::GetDllHandle` is unimplemented and fatal on iOS, so there is nothing to stage into
+> the common folder and `dlopen()`. Instead the framework is linked and copied into the `.app`
+> (`Framework.FrameworkMode.LinkAndCopy`): dyld maps it before `main()`, and `FGamingSdkLibrary`
+> resolves the same symbol table straight out of the process image. No call site changes.
+>
+> The iOS build also pulls in `AuthenticationServices` and depends on `ApplicationCore`, because the
+> account portal is presented through `ASWebAuthenticationSession`, which must be told which window to
+> present over (`EOSIOSAuth.mm`, via the engine's `IOSAppDelegate`).
 
 ### 2.2) Steamworks
 - Join the Steamworks partner program to access the SDK.
@@ -557,7 +609,8 @@ survives cooking (§3.6 — a key named `EncryptionKey` will not).
 |---|---|
 | `Missing required EOS settings: …` | The named keys are absent from the merged ini. Check `Config/GeneratedGame.ini` exists and that the key is `EOSEncryptionKey`, not `EncryptionKey`. |
 | Every capability reports unsupported | No backend available: SDK not vendored for this platform, library missing from the common folder, or the profile is `Disabled`. The startup log says which. |
-| Build says `not available on <platform>, not compiled in` | Expected on platforms with no vendored binary (e.g. Steam on Android, either SDK on iOS) — otherwise check the `ThirdParty` layout and filenames, case-sensitively. |
+| Build says `not available on <platform>, not compiled in` | Expected on platforms with no vendored binary (e.g. Steam on Android or iOS) — otherwise check the `ThirdParty` layout and filenames, case-sensitively. On iOS it also means `SDK-IOS/Bin/EOSSDK.framework/Headers/` is missing — that path *is* the include path there (§2.1). |
+| Build says `ERROR: EOS iOS framework missing` | `SDK-IOS/Bin/EOSSDK.embeddedframework.zip` is absent. It is not part of the download — build it (§2.1). |
 | Login fails on a Steam-into-EOS build | No Steam identity provider in the EOS Dev Portal, or a `WebApiIdentity` mismatch, or the game was launched outside the Steam client (watch for the `bAllowAuthFallback` path taking over). |
 | `GetFriends()` returns null on EOS | Connect-only sign-in has no `EpicAccountId`. Expected — use the identity backend's friend list. |
 | Avatars are null on EOS | No native EOS avatar API. Route the User capability to Steam via a `CapabilityOverrides` entry, or draw a fallback. |
