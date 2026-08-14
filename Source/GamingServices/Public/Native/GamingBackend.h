@@ -51,7 +51,8 @@ struct GAMINGSERVICES_API FGamingServicesRuntimeConfig
 
 	/**
 	 * When the auth backend cannot mint a credential (Steam not running, ticket refused), fall back to
-	 * the primary backend's own login rather than failing.
+	 * the primary backend's own login rather than failing. False makes the auth backend a hard
+	 * requirement: the process terminates at init if it does not come up.
 	 */
 	bool bAllowAuthFallback = true;
 

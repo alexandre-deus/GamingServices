@@ -26,7 +26,8 @@ namespace GamingServices
 		~FSteamPlatformCore();
 
 		// ---- Lifecycle ----
-		// Reads the configured AppId, honours SteamAPI_RestartAppIfNecessary, then InitializeSteamworks().
+		// Reads the configured AppId, honours SteamAPI_RestartAppIfNecessary (packaged builds only),
+		// then InitializeSteamworks().
 		void InitializePlatform();
 		void DestroyPlatform();
 		void Tick();

@@ -39,12 +39,28 @@ namespace GamingServices
 		const uint32 AppId = static_cast<uint32>(AppIdInt);
 		UE_LOG(LogTemp, Log, TEXT("SteamworksGamingService: AppId=%u from config"), AppId);
 
+		// The relaunch handshake only makes sense for a shipped build started outside Steam. Editor
+		// builds — including standalone launched from the editor — run out of the engine's binaries
+		// directory, where Steam finds no steam_appid.txt, so it would ask us to restart as the
+		// configured AppId every time. Steam also requires the process to end immediately here; the
+		// cooperative RequestExit(false) unwound the engine mid-module-load and asserted on missing
+		// generated code instead of exiting.
+#if !WITH_EDITOR
 		if (SteamAPI_RestartAppIfNecessary(AppId))
 		{
 			UE_LOG(LogTemp, Log, TEXT("SteamworksGamingService: SteamAPI_RestartAppIfNecessary requested relaunch via Steam; exiting"));
-			FPlatformMisc::RequestExit(false);
+			FPlatformMisc::RequestExit(true);
 			return;
 		}
+#else
+		// Same working-directory problem seen from the other side: with no steam_appid.txt to find,
+		// SteamAPI_InitEx fails outright with "No appID found". The SDK reads the id from the
+		// environment too, which keeps the answer on the config value above instead of depending on a
+		// stray file landing next to whichever executable the editor happened to launch.
+		const FString AppIdStr = FString::FromInt(AppIdInt);
+		FPlatformMisc::SetEnvironmentVar(TEXT("SteamAppId"), *AppIdStr);
+		FPlatformMisc::SetEnvironmentVar(TEXT("SteamGameId"), *AppIdStr);
+#endif
 
 		InitializeSteamworks();
 	}

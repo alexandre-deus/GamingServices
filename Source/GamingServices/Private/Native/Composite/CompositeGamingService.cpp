@@ -6,6 +6,8 @@
 #include "Native/Interfaces/IInviteTransport.h"
 #include "Native/Interfaces/IMatchmakingService.h"
 
+#include "HAL/PlatformMisc.h"
+
 namespace GamingServices
 {
 	FCompositeGamingService::FCompositeGamingService(const FGamingServicesRuntimeConfig& InConfig,
@@ -83,6 +85,36 @@ namespace GamingServices
 				Entry.Service->InitializePlatform(Params);
 			}
 		}
+
+		EnforceAuthBackendRequirement();
+	}
+
+	void FCompositeGamingService::EnforceAuthBackendRequirement() const
+	{
+		// With fallback disabled the profile states a requirement, not a preference. Catch it here, at
+		// init, rather than at the login call: by then the menu is up and the player is told "sign-in
+		// failed" for what is really a broken build or a missing platform client.
+		if (Config.AuthBackend == EGamingBackend::None || Config.bAllowAuthFallback)
+		{
+			return;
+		}
+
+		const IGamingService* IdentityService = GetBackendService(Config.AuthBackend);
+		if (IdentityService && IdentityService->IsInitialized())
+		{
+			return;
+		}
+
+		UE_LOG(LogTemp, Error,
+		       TEXT("GamingServices: profile '%s' requires %s to authenticate the %s session, but %s did not initialize. ")
+		       TEXT("Fallback is disabled for this profile, so there is no identity to run as — terminating."),
+		       *Config.ProfileName, LexToString(Config.AuthBackend), LexToString(Primary),
+		       LexToString(Config.AuthBackend));
+
+		// Forced, not cooperative. This runs from FGamingServicesModule::StartupModule, and a requested
+		// exit at that point unwinds the engine before every module has registered its generated code —
+		// which asserts in UObjectGlobals instead of quitting.
+		FPlatformMisc::RequestExit(true);
 	}
 
 	void FCompositeGamingService::DestroyPlatform()

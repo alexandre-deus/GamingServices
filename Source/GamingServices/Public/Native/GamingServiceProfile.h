@@ -33,7 +33,8 @@ struct FGamingServiceProfile
 
 	/**
 	 * When the auth backend cannot vouch for the player (Steam not running, ticket refused), fall back to
-	 * the primary's own login instead of failing the sign-in.
+	 * the primary's own login instead of failing the sign-in. False makes the auth backend a hard
+	 * requirement and the process terminates at init if it does not come up.
 	 */
 	bool bAllowAuthFallback = true;
 
@@ -75,15 +76,17 @@ namespace GamingServiceProfiles
 	 * created — the EOS ProductUserId is the identity, and the Steam persona rides along as the display
 	 * name. Requires a Steam identity provider configured in the EOS Dev Portal.
 	 *
-	 * If Steam is unavailable (launched outside the client), bAllowAuthFallback lets EOS's own login
-	 * take over rather than locking the player out.
+	 * Fallback is off: this is the Steam build, so Steam is a requirement rather than a preference. If
+	 * Steam cannot vouch for the player there is no honest way to continue — falling through to EOS's
+	 * own login would sign them in as a different identity, with a different ProductUserId and none of
+	 * their progress. The game terminates instead.
 	 */
 	inline constexpr FGamingServiceProfile SteamAuthIntoEpic
 	{
 		.Name = TEXT("SteamAuthIntoEpic"),
 		.Backends = { EGamingBackend::EpicOnlineServices },
 		.AuthBackend = EGamingBackend::Steamworks,
-		.bAllowAuthFallback = true,
+		.bAllowAuthFallback = false,
 	};
 
 	/** EOS where available, Steam otherwise. Two independent single-backend paths, never combined. */

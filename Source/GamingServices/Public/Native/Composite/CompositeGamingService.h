@@ -71,6 +71,13 @@ namespace GamingServices
 
 	private:
 		/**
+		 * Ends the process when the profile disables auth fallback and the auth backend failed to come
+		 * up. Such a build has no identity it is allowed to run as, so continuing would sign the player
+		 * in as the wrong one.
+		 */
+		void EnforceAuthBackendRequirement() const;
+
+		/**
 		 * Resolves a capability to the backend the config routes it to, falling back to the primary when
 		 * that backend does not implement it. Taking the accessor as a member pointer keeps one
 		 * implementation for all eight capabilities instead of eight near-identical ones.
