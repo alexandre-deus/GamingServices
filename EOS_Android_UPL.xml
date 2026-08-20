@@ -96,13 +96,23 @@
 
 	<!-- Register the browser auth-handler activity and a deep-link intent-filter (eos.<clientid>) so
 	     AccountPortal / PersistentAuth logins can redirect back into the app. ClientId comes from this
-	     project's own config section, not OnlineSubsystemEOS. -->
+	     project's own config section, not OnlineSubsystemEOS.
+
+	     ClientId MUST be in Config/DefaultGame.ini. This lookup goes through UPL's own config reader
+	     (UnrealPluginLanguage.cs, ConfigCacheIni_UPL), whose hierarchy is Base -> Default -> Platform
+	     -> User: it has no ProjectGenerated layer, so a ClientId in Config/GeneratedGame.ini reads back
+	     empty here even though UBT's ConfigHierarchy and the runtime both see it fine. When that
+	     happens the app still opens the account portal and the player still accepts consent, but the
+	     eos.<clientid> redirect has no handler and login hangs on the spinner forever. -->
 	<androidManifestUpdates>
 		<setStringFromProperty result="eosClientId" ini="Game" section="GamingServices.EOS" property="ClientId"/>
 		<setStringReplace result="eosClientId" source="$S(eosClientId)" find="&quot;" with=""/>
 		<setStringToLower result="eosClientId" source="$S(eosClientId)"/>
 		<setBoolIsEqual result="eosClientIdInvalid" arg1="$S(eosClientId)" arg2=""/>
 		<if condition="eosClientIdInvalid">
+			<true>
+				<log text="GamingServices EOS: ERROR - no ClientId in [GamingServices.EOS] of Config/DefaultGame.ini. The eos.&lt;clientid&gt; intent-filter will be MISSING from the manifest and Android account-portal login will hang after consent. Note UPL cannot read Config/GeneratedGame.ini."/>
+			</true>
 			<false>
 				<!-- intent-filter: VIEW + DEFAULT + BROWSABLE with data scheme eos.<clientid> -->
 				<setElement result="intentFilterAction" value="action"/>
