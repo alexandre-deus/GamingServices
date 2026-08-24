@@ -390,6 +390,11 @@ a pointer.
 | Capability | EOS | Steamworks |
 |---|---|---|
 | Achievements | yes | yes |
+| — progress toast (`IndicateProgress`) | no — the server drives its own | yes |
+| — global unlock % (rarity) | no — EOS publishes no rarity data | yes, after the percentages arrive |
+| — achievement icons | yes, as URLs | no — image handles, not URLs |
+| — reset (development only) | no | yes (clears stats too) |
+| Achievement progress (registered catalogue) | yes | yes |
 | Entitlements | yes | yes |
 | Leaderboards | yes | yes |
 | Stats | yes | yes |
@@ -412,6 +417,9 @@ Two entries deserve emphasis:
 - **Remote settings is not a platform feature.** `FRemoteSettingsStore` implements it generically over
   any `ICloudStorageService` as a single `game_settings.json` blob, so remote-settings support tracks
   cloud-storage support on every backend.
+- **Neither is achievement progress.** `FAchievementProgressStore` implements it generically over any
+  `IAchievementsService` plus that backend's `IStatsService`, so it tracks achievement support the same
+  way. It owns the id mapping and the one progression rule both platforms need — see §6.1.
 
 ---
 
@@ -431,7 +439,7 @@ execs.
 | Category | Async nodes | Pure / immediate |
 |---|---|---|
 | User | `Login` | `IsLoggedIn`, `NeedsLogin`, `GetUserId`, `GetDisplayName`, `GetAvatar`, `GetAvatarByUserId` |
-| Achievements | `UnlockAchievement`, `QueryAchievements` | — |
+| Achievements | `UnlockAchievement`, `QueryAchievements`, `ReportAchievementProgress`, `AddAchievementProgress`, `ValidateAchievements`, `ListenForAchievementUnlocks` | `RegisterAchievements`, `GetRegisteredAchievements`, `ResolvePlatformAchievementId`, `AreAchievementsReady`, `GetCachedAchievements`, `GetCachedAchievement`, `GetAchievementCount`, `GetAchievementAt` |
 | Leaderboards | `WriteLeaderboardScore`, `QueryLeaderboardPage`, `QueryLeaderboardUserRank` | — |
 | Stats | `IngestStat`, `QueryStat` | — |
 | Cloud storage | `WriteFile`, `ReadFile`, `DeleteFile`, `ListFiles` | — |
@@ -447,7 +455,109 @@ Login options mirror the native struct: set `FGamingServiceLoginParams.EOS.Metho
 > Notification **sinks** (session members joining/leaving, invites arriving, avatars finishing download)
 > are `TFunction` members on the native interfaces, so they are bound from C++. Surface them to
 > Blueprints from your own game subsystem — that keeps ownership of "who listens" in game code, where a
-> single owner can re-broadcast on a gameplay message or a dynamic delegate.
+> single owner can re-broadcast on a gameplay message or a dynamic delegate. The one exception is
+> `ListenForAchievementUnlocks`, which wraps the achievement sink in a node because an unlock has
+> exactly one natural consumer (the toast) and can arrive without the game asking for it.
+
+### 6.1) Achievements
+
+Two layers, and which one you want depends on whether you ship on more than one store.
+
+**`IAchievementsService`** is the platform's own API, addressed by *platform* ids — a Steam API Name or
+an EOS AchievementId. Everything a backend genuinely supports is on it, and everything it does not is a
+default implementation that reports failure rather than pretending (see the capability table in §5.3).
+
+**`IAchievementProgressService`** is the layer above it, addressed by *your* ids. Register a catalogue
+once and every other call takes the game's own id on every platform:
+
+```cpp
+TArray<FAchievementDefinition> Definitions;
+
+FAchievementDefinition& Dragon = Definitions.AddDefaulted_GetRef();
+Dragon.Id = TEXT("SlayTheDragon");
+Dragon.SteamApiName = TEXT("ACH_DRAGON");
+Dragon.EOSAchievementId = TEXT("slay_the_dragon");
+
+FAchievementDefinition& Hundred = Definitions.AddDefaulted_GetRef();
+Hundred.Id = TEXT("Monster100");
+Hundred.SteamApiName = TEXT("ACH_MONSTER_100");
+Hundred.EOSAchievementId = TEXT("monster_100");
+Hundred.StatName = TEXT("monsters_killed");   // must match the platform's own stat name
+Hundred.TargetValue = 100;
+
+Service->GetAchievementProgress()->RegisterAchievements(Definitions);
+```
+
+Registration is pure data with no platform calls behind it, so it is safe before sign-in and before the
+SDK is up — do it once at start-up, from a data asset, a table, or literals. Registering again merges
+by `Id`. **With nothing registered every id passes through unchanged**, so adopting the catalogue is
+optional and can be done one achievement at a time.
+
+**Platform-exclusive achievements** leave the other store's id empty:
+
+```cpp
+FAchievementDefinition& EpicOnly = Definitions.AddDefaulted_GetRef();
+EpicOnly.Id = TEXT("Used10Cards");
+EpicOnly.EOSAchievementId = TEXT("Used10Cards");   // no SteamApiName -> not on Steam
+EpicOnly.StatName = TEXT("cards_used");
+EpicOnly.TargetValue = 10;
+```
+
+An empty platform id means two different things, decided by whether the row names *any* platform id:
+
+| Row | Meaning |
+|---|---|
+| No platform id set at all | `Id` is used verbatim on every platform |
+| Some platform id set, this one empty | The achievement does not exist on this platform |
+
+On a platform the achievement does not exist on, every call against it — unlock, progress, cached read
+— is a **no-op success**, and the backing stat is not written either. Nothing failed, and there is
+nothing the caller could do about it; reporting failure would push per-platform branching back into
+gameplay code, which is the thing this layer exists to remove. `ValidateAgainstPlatform` skips these
+rather than reporting them as missing, and counts them separately in its summary line.
+
+Then gameplay reports totals and the store does whatever the live platform requires:
+
+```cpp
+// "The player has now killed 42 monsters in total." Safe to call every kill, or every level, or once
+// on load — a total at or below the stored one is a no-op, so nothing is ever double-counted.
+Progress->ReportProgress(TEXT("Monster100"), TotalMonstersKilled, [](const FAchievementProgressResult& R)
+{
+    if (R.bUnlockedNow) { /* this call is what earned it */ }
+});
+```
+
+What that does per platform:
+
+| | Steam | EOS |
+|---|---|---|
+| stat write | `SetStat` to the new total, then `StoreStats` | `IngestStat` of the delta |
+| progress toast | `IndicateAchievementProgress` at 10% milestones | — (EOS drives its own) |
+| unlock at target | issued by the store | issued by the store *and* by the EOS server |
+
+The unlock is always issued explicitly, including on EOS whose server would eventually unlock from the
+threshold by itself. It is idempotent there, and issuing it makes the moment the player earns an
+achievement identical on both platforms rather than "immediately here, whenever the server notices
+there".
+
+Three things worth knowing:
+
+- **`Progress` is the player's own 0..1 completion on every backend.** The share of players who own an
+  achievement is `GlobalUnlockPercent` (0..100, `-1` when unknown), which is a different number. Steam
+  only fills it in after `QueryAchievements` has fetched the global percentages, so it arrives on a
+  later query than the first.
+- **An EOS stat driven by `ReportProgress` must use SUM aggregation.** Progress is written as a delta
+  against the stored value, because `IngestStat` is additive on both backends. A MAX or LATEST stat
+  should be driven through `IStatsService` directly instead.
+- **`TargetValue` is duplicated with the EOS Dev Portal threshold**, because EOS holds it server-side
+  and Steam has no server-side rule at all. `ValidateAgainstPlatform()` checks the catalogue against
+  what the live backend publishes — missing ids, drifted targets, stats the platform does not gate on —
+  and logs each one. Call it once after sign-in in development builds; portal drift otherwise shows up
+  as an achievement that silently never fires in a shipped build.
+
+Unlocks are reported through `IAchievementsService::OnAchievementUnlocked`, including ones this game
+never asked for (an EOS server-side threshold, another device, a stat written by a different build).
+Drive the toast from there rather than from an unlock call's own result.
 
 ---
 

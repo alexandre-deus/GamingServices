@@ -2,6 +2,7 @@
 
 #include "Native/Steam/SteamGamingService.h"
 
+#include "Native/AchievementProgressStore.h"
 #include "Native/RemoteSettingsStore.h"
 #include "Native/Steam/SteamPlatformCore.h"
 #include "Native/Steam/Interfaces/SteamAchievements.h"
@@ -30,6 +31,8 @@ namespace GamingServices
 		Stats = MakeUnique<FSteamStats>(*Core);
 		CloudStorage = MakeUnique<FSteamCloudStorage>(*Core);
 		RemoteSettings = MakeUnique<FRemoteSettingsStore>(*CloudStorage);
+		AchievementProgress = MakeUnique<FAchievementProgressStore>(*Achievements, Stats.Get(),
+		                                                           EGamingBackend::Steamworks);
 		ExternalAuth = MakeUnique<FSteamExternalAuth>(*Core);
 		InviteTransport = MakeUnique<FSteamInviteTransport>(*Core);
 		Friends = MakeUnique<FSteamFriends>(*Core, *InviteTransport);
@@ -62,6 +65,7 @@ namespace GamingServices
 	}
 
 	IAchievementsService*   FSteamGamingService::GetAchievements()   const { return Achievements.Get(); }
+	IAchievementProgressService* FSteamGamingService::GetAchievementProgress() const { return AchievementProgress.Get(); }
 	IEntitlementsService*   FSteamGamingService::GetEntitlements()   const { return Entitlements.Get(); }
 	ILeaderboardsService*   FSteamGamingService::GetLeaderboards()   const { return Leaderboards.Get(); }
 	IStatsService*          FSteamGamingService::GetStats()          const { return Stats.Get(); }

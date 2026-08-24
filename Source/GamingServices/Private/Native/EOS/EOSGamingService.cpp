@@ -30,6 +30,8 @@ namespace GamingServices
 		User = MakeUnique<FEOSUser>(*Core);
 		Friends = MakeUnique<FEOSFriends>(*Core, *Matchmaking);
 		RemoteSettings = MakeUnique<FRemoteSettingsStore>(*CloudStorage);
+		AchievementProgress = MakeUnique<FAchievementProgressStore>(*Achievements, Stats.Get(),
+		                                                           EGamingBackend::EpicOnlineServices);
 		ExternalAuth = MakeUnique<FEOSExternalAuth>(*Core);
 	}
 
@@ -59,6 +61,7 @@ namespace GamingServices
 	}
 
 	IAchievementsService*   FEOSGamingService::GetAchievements()   const { return Achievements.Get(); }
+	IAchievementProgressService* FEOSGamingService::GetAchievementProgress() const { return AchievementProgress.Get(); }
 	IEntitlementsService*   FEOSGamingService::GetEntitlements()   const { return Entitlements.Get(); }
 	ILeaderboardsService*   FEOSGamingService::GetLeaderboards()   const { return Leaderboards.Get(); }
 	IStatsService*          FEOSGamingService::GetStats()          const { return Stats.Get(); }

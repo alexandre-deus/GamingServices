@@ -116,6 +116,13 @@ namespace GamingServices
 		TFunction<void()> RegisterMatchmakingNotificationsHook;
 		TFunction<void()> UnregisterMatchmakingNotificationsHook;
 
+		// Achievement notification hooks owned by FEOSAchievements, fired at the same two points and for
+		// the same reason as the matchmaking pair above: EOS_Achievements_AddNotifyAchievementsUnlockedV2
+		// needs the achievements handle and the ProductUserId, which only exist after login, and the
+		// matching RemoveNotify must run before the platform goes away.
+		TFunction<void()> RegisterAchievementsNotificationsHook;
+		TFunction<void()> UnregisterAchievementsNotificationsHook;
+
 	private:
 		struct FImpl;
 		TPimplPtr<FImpl> Impl;

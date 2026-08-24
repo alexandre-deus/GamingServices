@@ -22,6 +22,8 @@ namespace GamingServices
 	 */
 	struct FEOSApi
 	{
+		decltype(&::EOS_Achievements_AddNotifyAchievementsUnlockedV2) Achievements_AddNotifyAchievementsUnlockedV2 = nullptr;
+		decltype(&::EOS_Achievements_CopyAchievementDefinitionV2ByAchievementId) Achievements_CopyAchievementDefinitionV2ByAchievementId = nullptr;
 		decltype(&::EOS_Achievements_CopyAchievementDefinitionV2ByIndex) Achievements_CopyAchievementDefinitionV2ByIndex = nullptr;
 		decltype(&::EOS_Achievements_CopyPlayerAchievementByAchievementId) Achievements_CopyPlayerAchievementByAchievementId = nullptr;
 		decltype(&::EOS_Achievements_DefinitionV2_Release) Achievements_DefinitionV2_Release = nullptr;
@@ -29,6 +31,7 @@ namespace GamingServices
 		decltype(&::EOS_Achievements_PlayerAchievement_Release) Achievements_PlayerAchievement_Release = nullptr;
 		decltype(&::EOS_Achievements_QueryDefinitions) Achievements_QueryDefinitions = nullptr;
 		decltype(&::EOS_Achievements_QueryPlayerAchievements) Achievements_QueryPlayerAchievements = nullptr;
+		decltype(&::EOS_Achievements_RemoveNotifyAchievementsUnlocked) Achievements_RemoveNotifyAchievementsUnlocked = nullptr;
 		decltype(&::EOS_Achievements_UnlockAchievements) Achievements_UnlockAchievements = nullptr;
 		decltype(&::EOS_Auth_CopyUserAuthToken) Auth_CopyUserAuthToken = nullptr;
 		decltype(&::EOS_Auth_Login) Auth_Login = nullptr;

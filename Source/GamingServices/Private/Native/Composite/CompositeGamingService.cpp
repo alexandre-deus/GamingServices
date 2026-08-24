@@ -45,6 +45,8 @@ namespace GamingServices
 				       LexToString(Primary));
 			}
 		}
+
+		WarnOnSplitAchievementRouting();
 	}
 
 	FCompositeGamingService::~FCompositeGamingService()
@@ -178,6 +180,46 @@ namespace GamingServices
 	IAchievementsService* FCompositeGamingService::GetAchievements() const
 	{
 		return RouteCapability(EGamingCapability::Achievements, &IGamingService::GetAchievements);
+	}
+
+	IAchievementProgressService* FCompositeGamingService::GetAchievementProgress() const
+	{
+		// Deliberately NOT routed on its own key. Each backend's store is bound to that backend's own
+		// achievements and stats at construction, so it has to come from the same backend achievements
+		// come from — routing it anywhere else would hand back a store writing to the wrong platform.
+		const EGamingBackend Target = Config.GetBackendForCapability(EGamingCapability::Achievements, Primary);
+		if (IGamingService* Routed = GetBackendService(Target))
+		{
+			if (IAchievementProgressService* Result = Routed->GetAchievementProgress())
+			{
+				return Result;
+			}
+		}
+
+		IGamingService* PrimaryService = GetPrimaryService();
+		return PrimaryService ? PrimaryService->GetAchievementProgress() : nullptr;
+	}
+
+	void FCompositeGamingService::WarnOnSplitAchievementRouting() const
+	{
+		const EGamingBackend AchievementsBackend =
+			Config.GetBackendForCapability(EGamingCapability::Achievements, Primary);
+		const EGamingBackend StatsBackend = Config.GetBackendForCapability(EGamingCapability::Stats, Primary);
+
+		if (AchievementsBackend == StatsBackend)
+		{
+			return;
+		}
+
+		// Progressive achievements are unlocked by a stat crossing a threshold, and the threshold is
+		// configured on the same platform that owns the achievement. Send the stats somewhere else and
+		// the counter fills up on one platform while the achievement waits forever on the other — with
+		// no error anywhere, which is the worst way for this to fail.
+		UE_LOG(LogTemp, Warning,
+		       TEXT("GamingServices: profile '%s' routes Achievements to %s but Stats to %s. Progressive "
+			       "achievements cannot unlock across that split — the stats never reach the platform "
+			       "holding the thresholds. Route both to the same backend."),
+		       *Config.ProfileName, LexToString(AchievementsBackend), LexToString(StatsBackend));
 	}
 
 	IEntitlementsService* FCompositeGamingService::GetEntitlements() const

@@ -4,6 +4,7 @@
 #include "Native/IGamingService.h"
 
 class FRemoteSettingsStore;
+class FAchievementProgressStore;
 
 namespace GamingServices
 {
@@ -39,6 +40,7 @@ namespace GamingServices
 
 		// Steam implements every capability.
 		virtual IAchievementsService*   GetAchievements()   const override;
+		virtual IAchievementProgressService* GetAchievementProgress() const override;
 		virtual IEntitlementsService*   GetEntitlements()   const override;
 		virtual ILeaderboardsService*   GetLeaderboards()   const override;
 		virtual IStatsService*          GetStats()          const override;
@@ -72,6 +74,9 @@ namespace GamingServices
 		TUniquePtr<FSteamUser> User;
 		TUniquePtr<FSteamMatchmaking> Matchmaking;
 		TUniquePtr<FRemoteSettingsStore> RemoteSettings;
+		// Declared after Achievements and Stats: it holds references to both, and members destroy in
+		// reverse declaration order.
+		TUniquePtr<FAchievementProgressStore> AchievementProgress;
 		// Declared last on purpose: Friends holds a FSteamInviteTransport& (it invites to whatever session
 		// the transport has published), and members destroy in reverse declaration order.
 		TUniquePtr<FSteamFriends> Friends;

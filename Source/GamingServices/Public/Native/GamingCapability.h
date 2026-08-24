@@ -18,7 +18,13 @@ enum class EGamingCapability : uint8
 	RemoteSettings,
 	Matchmaking,
 	User,
-	Friends
+	Friends,
+
+	/**
+	 * Registered-catalogue achievements layered over Achievements + Stats (FAchievementProgressStore).
+	 * Appended rather than grouped with Achievements so the existing values keep their numbers.
+	 */
+	AchievementProgress
 };
 
 /**
@@ -60,11 +66,15 @@ struct GAMINGSERVICES_API FGamingServiceCapabilities
 	UPROPERTY(BlueprintReadOnly, Category = "GamingServices|Capabilities")
 	bool bFriends = false;
 
+	UPROPERTY(BlueprintReadOnly, Category = "GamingServices|Capabilities")
+	bool bAchievementProgress = false;
+
 	/** Returns whether the backend supports at least one capability (i.e. it is a real platform). */
 	bool HasAny() const
 	{
 		return bAchievements || bEntitlements || bLeaderboards || bStats
-			|| bCloudStorage || bRemoteSettings || bMatchmaking || bUser || bFriends;
+			|| bCloudStorage || bRemoteSettings || bMatchmaking || bUser || bFriends
+			|| bAchievementProgress;
 	}
 
 	/** Returns whether the given capability flag is set. */
@@ -81,6 +91,7 @@ struct GAMINGSERVICES_API FGamingServiceCapabilities
 		case EGamingCapability::Matchmaking:    return bMatchmaking;
 		case EGamingCapability::User:           return bUser;
 		case EGamingCapability::Friends:        return bFriends;
+		case EGamingCapability::AchievementProgress: return bAchievementProgress;
 		default:                                return false;
 		}
 	}

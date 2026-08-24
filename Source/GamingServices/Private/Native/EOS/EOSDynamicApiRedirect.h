@@ -14,6 +14,8 @@
  *
  * GENERATED — keep in sync with EOSDynamicApi.h and EOSDynamicApi.cpp.
  */
+#define EOS_Achievements_AddNotifyAchievementsUnlockedV2      ::GamingServices::GEOSApi.Achievements_AddNotifyAchievementsUnlockedV2
+#define EOS_Achievements_CopyAchievementDefinitionV2ByAchievementId ::GamingServices::GEOSApi.Achievements_CopyAchievementDefinitionV2ByAchievementId
 #define EOS_Achievements_CopyAchievementDefinitionV2ByIndex   ::GamingServices::GEOSApi.Achievements_CopyAchievementDefinitionV2ByIndex
 #define EOS_Achievements_CopyPlayerAchievementByAchievementId ::GamingServices::GEOSApi.Achievements_CopyPlayerAchievementByAchievementId
 #define EOS_Achievements_DefinitionV2_Release                 ::GamingServices::GEOSApi.Achievements_DefinitionV2_Release
@@ -21,6 +23,7 @@
 #define EOS_Achievements_PlayerAchievement_Release            ::GamingServices::GEOSApi.Achievements_PlayerAchievement_Release
 #define EOS_Achievements_QueryDefinitions                     ::GamingServices::GEOSApi.Achievements_QueryDefinitions
 #define EOS_Achievements_QueryPlayerAchievements              ::GamingServices::GEOSApi.Achievements_QueryPlayerAchievements
+#define EOS_Achievements_RemoveNotifyAchievementsUnlocked     ::GamingServices::GEOSApi.Achievements_RemoveNotifyAchievementsUnlocked
 #define EOS_Achievements_UnlockAchievements                   ::GamingServices::GEOSApi.Achievements_UnlockAchievements
 #define EOS_Auth_CopyUserAuthToken                            ::GamingServices::GEOSApi.Auth_CopyUserAuthToken
 #define EOS_Auth_Login                                        ::GamingServices::GEOSApi.Auth_Login

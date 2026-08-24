@@ -5,6 +5,7 @@
 
 #if defined(GS_WITH_EOS)
 
+#include "Native/AchievementProgressStore.h"
 #include "Native/RemoteSettingsStore.h"
 
 namespace GamingServices
@@ -45,6 +46,7 @@ namespace GamingServices
 
 		// EOS implements every capability except avatar (HasAvatars stays false from the base).
 		virtual IAchievementsService*   GetAchievements()   const override;
+		virtual IAchievementProgressService* GetAchievementProgress() const override;
 		virtual IEntitlementsService*   GetEntitlements()   const override;
 		virtual ILeaderboardsService*   GetLeaderboards()   const override;
 		virtual IStatsService*          GetStats()          const override;
@@ -79,6 +81,9 @@ namespace GamingServices
 		TUniquePtr<FEOSMatchmaking> Matchmaking;
 		TUniquePtr<FEOSUser> User;
 		TUniquePtr<FRemoteSettingsStore> RemoteSettings;
+		// Declared after Achievements and Stats: it holds references to both, and members destroy in
+		// reverse declaration order.
+		TUniquePtr<FAchievementProgressStore> AchievementProgress;
 		// Declared last on purpose: Friends holds an IMatchmakingService& (it invites to the current
 		// lobby), and members destroy in reverse declaration order.
 		TUniquePtr<FEOSFriends> Friends;

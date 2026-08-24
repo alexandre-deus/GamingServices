@@ -47,6 +47,7 @@ namespace GamingServices
 		virtual bool IsInitialized() const override;
 
 		virtual IAchievementsService*   GetAchievements()   const override;
+		virtual IAchievementProgressService* GetAchievementProgress() const override;
 		virtual IEntitlementsService*   GetEntitlements()   const override;
 		virtual ILeaderboardsService*   GetLeaderboards()   const override;
 		virtual IStatsService*          GetStats()          const override;
@@ -76,6 +77,12 @@ namespace GamingServices
 		 * in as the wrong one.
 		 */
 		void EnforceAuthBackendRequirement() const;
+
+		/**
+		 * Logs a warning when the profile sends Achievements and Stats to different backends, which
+		 * silently breaks every progressive achievement. Checked once at construction.
+		 */
+		void WarnOnSplitAchievementRouting() const;
 
 		/**
 		 * Resolves a capability to the backend the config routes it to, falling back to the primary when

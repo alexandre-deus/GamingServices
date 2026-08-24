@@ -52,6 +52,8 @@ namespace GamingServices
 	GEOSApi.Member = reinterpret_cast<decltype(GEOSApi.Member)>(Library.GetExport(TEXT(Symbol))); \
 	if (!GEOSApi.Member) { MissingSymbols.Add(TEXT(Symbol)); }
 
+		GS_EOS_BIND(Achievements_AddNotifyAchievementsUnlockedV2,      "EOS_Achievements_AddNotifyAchievementsUnlockedV2")
+		GS_EOS_BIND(Achievements_CopyAchievementDefinitionV2ByAchievementId, "EOS_Achievements_CopyAchievementDefinitionV2ByAchievementId")
 		GS_EOS_BIND(Achievements_CopyAchievementDefinitionV2ByIndex,   "EOS_Achievements_CopyAchievementDefinitionV2ByIndex")
 		GS_EOS_BIND(Achievements_CopyPlayerAchievementByAchievementId, "EOS_Achievements_CopyPlayerAchievementByAchievementId")
 		GS_EOS_BIND(Achievements_DefinitionV2_Release,                 "EOS_Achievements_DefinitionV2_Release")
@@ -59,6 +61,7 @@ namespace GamingServices
 		GS_EOS_BIND(Achievements_PlayerAchievement_Release,            "EOS_Achievements_PlayerAchievement_Release")
 		GS_EOS_BIND(Achievements_QueryDefinitions,                     "EOS_Achievements_QueryDefinitions")
 		GS_EOS_BIND(Achievements_QueryPlayerAchievements,              "EOS_Achievements_QueryPlayerAchievements")
+		GS_EOS_BIND(Achievements_RemoveNotifyAchievementsUnlocked,     "EOS_Achievements_RemoveNotifyAchievementsUnlocked")
 		GS_EOS_BIND(Achievements_UnlockAchievements,                   "EOS_Achievements_UnlockAchievements")
 		GS_EOS_BIND(Auth_CopyUserAuthToken,                            "EOS_Auth_CopyUserAuthToken")
 		GS_EOS_BIND(Auth_Login,                                        "EOS_Auth_Login")

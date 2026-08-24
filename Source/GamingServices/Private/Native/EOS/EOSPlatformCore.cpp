@@ -325,6 +325,11 @@ namespace GamingServices
 			UnregisterMatchmakingNotificationsHook();
 		}
 
+		if (UnregisterAchievementsNotificationsHook)
+		{
+			UnregisterAchievementsNotificationsHook();
+		}
+
 		bIsConnected = false;
 		bIsLoggedIn = false;
 		UserId.Empty();
@@ -698,6 +703,14 @@ namespace GamingServices
 		if (RegisterMatchmakingNotificationsHook)
 		{
 			RegisterMatchmakingNotificationsHook();
+		}
+
+		// Same timing, for the achievement-unlocked notification. Registering it here means unlocks the
+		// EOS server decides on its own (a stat threshold crossed by another device, or by a stat this
+		// build never wrote) still reach the game.
+		if (RegisterAchievementsNotificationsHook)
+		{
+			RegisterAchievementsNotificationsHook();
 		}
 
 		UE_LOG(LogTemp, Log, TEXT("EOSGamingService: Authentication successful, resolving display name..."));

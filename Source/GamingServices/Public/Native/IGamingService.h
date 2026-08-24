@@ -6,6 +6,7 @@
 #include "Native/GamingCapability.h"
 
 class IAchievementsService;
+class IAchievementProgressService;
 class IExternalAuthProvider;
 class IExternalAuthConsumer;
 class IInviteTransport;
@@ -50,6 +51,15 @@ public:
 	// Capability accessors — a backend overrides the ones it implements; default null = unsupported.
 	virtual IAchievementsService*   GetAchievements()   const { return nullptr; }
 	virtual IEntitlementsService*   GetEntitlements()   const { return nullptr; }
+
+	/**
+	 * Achievements addressed by the game's own ids, with one call to move a counted achievement
+	 * forward (FAchievementProgressStore). Layered over GetAchievements() + GetStats() exactly as
+	 * GetRemoteSettings() is layered over GetCloudStorage(), so a backend that has achievements has
+	 * this too.
+	 */
+	virtual IAchievementProgressService* GetAchievementProgress() const { return nullptr; }
+
 	virtual ILeaderboardsService*   GetLeaderboards()   const { return nullptr; }
 	virtual IStatsService*          GetStats()          const { return nullptr; }
 	virtual ICloudStorageService*   GetCloudStorage()   const { return nullptr; }
@@ -102,6 +112,7 @@ public:
 		Caps.bMatchmaking    = GetMatchmaking()    != nullptr;
 		Caps.bUser           = GetUser()           != nullptr;
 		Caps.bFriends        = GetFriends()        != nullptr;
+		Caps.bAchievementProgress = GetAchievementProgress() != nullptr;
 		return Caps;
 	}
 };
